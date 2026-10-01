@@ -1,0 +1,64 @@
+# Windows exe ve macOS (Apple Silicon) uygulamasını GitHub'ın ücretsiz sunucularında derler.
+# Actions sekmesinden "Run workflow" ile elle başlatılır; sonuçlar "Artifacts" altından indirilir.
+name: Build
+on: workflow_dispatch
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+
+      - name: Modelleri indir
+        shell: bash
+        run: |
+          set -e
+          mkdir -p models/large-v3-turbo models/small
+          for f in config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin; do
+            curl -sfL -o models/large-v3-turbo/$f https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main/$f
+          done
+          for f in config.json tokenizer.json vocabulary.txt model.bin; do
+            curl -sfL -o models/small/$f https://huggingface.co/Systran/faster-whisper-small/resolve/main/$f
+          done
+
+      - run: pyinstaller --noconfirm DersTranskript.spec
+
+      - name: Windows - paketi test et
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\DersTranskript\DersTranskript.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content selftest.log
+          if ($p.ExitCode -ne 0) { exit 1 }
+          if (-not (Select-String -Path selftest.log -Pattern "SELFTEST OK")) { exit 1 }
+
+      - name: macOS - paketi test et
+        if: runner.os == 'macOS'
+        run: dist/DersTranskript.app/Contents/MacOS/DersTranskript --selftest | tee /dev/stderr | grep -q "SELFTEST OK"
+
+      - name: macOS - imzala ve DMG oluştur
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --deep --sign - dist/DersTranskript.app
+          mkdir dmg && cp -R dist/DersTranskript.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "Ders Transkript" -srcfolder dmg -ov -format UDZO DersTranskript-mac.dmg
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: DersTranskript-windows
+          path: dist/DersTranskript
+          compression-level: 1
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: DersTranskript-mac
+          path: DersTranskript-mac.dmg
+          compression-level: 0

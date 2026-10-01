@@ -1,0 +1,10 @@
+models/
+wheels/
+test/
+build/
+dist/
+__pycache__/
+.venv/
+*.txt
+!requirements.txt
+selftest.log
