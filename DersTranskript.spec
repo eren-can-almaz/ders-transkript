@@ -33,5 +33,7 @@ if sys.platform == "darwin":
             "CFBundleDisplayName": "Ders Transkript",
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
+            # Canlı dinleme için zorunlu: bu açıklama yoksa macOS mikrofon erişimini reddeder.
+            "NSMicrophoneUsageDescription": "Canlı dinleme modunda konuşmayı metne çevirmek için mikrofon kullanılır. Ses bilgisayarınızdan dışarı gönderilmez.",
         },
     )

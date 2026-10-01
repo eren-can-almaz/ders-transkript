@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6.QtCore import QBuffer, QIODevice
 from PyQt6.QtGui import QGuiApplication
 
-from transkript import icon_pixmap
+from theme import icon_pixmap
 
 OUT = Path(__file__).resolve().parent / "assets"
 
