@@ -12,7 +12,7 @@ from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QSplitter, QVBoxLayout, QWidget,
+    QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
 import i18n
@@ -84,11 +84,18 @@ class MainWindow(QMainWindow):
         self.live = LivePanel()
         self.file.tab_status.connect(lambda s: self._set_tab_status(0, s))
         self.live.tab_status.connect(lambda s: self._set_tab_status(1, s))
+        self.live.transcribe_request.connect(self._transcribe_recording)
         self.split = QSplitter(Qt.Orientation.Horizontal)
         self.split.setChildrenCollapsible(False)
         self.split.setHandleWidth(18)
-        self.split.addWidget(self.file)
-        self.split.addWidget(self.live)
+        for panel in (self.file, self.live):  # pencere küçükse ezilmek yerine kaydırılsın
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setFrameShape(QScrollArea.Shape.NoFrame)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            area.setWidget(panel)
+            panel.area = area
+            self.split.addWidget(area)
         lay.addWidget(self.split, 1)
 
         # son kullanılan ayarlar
@@ -115,8 +122,8 @@ class MainWindow(QMainWindow):
     def _update_layout(self, *_):
         side = self.split_btn.isChecked()
         self.tabs.setEnabled(not side)
-        self.file.setVisible(side or self.tabs.index == 0)
-        self.live.setVisible(side or self.tabs.index == 1)
+        self.file.area.setVisible(side or self.tabs.index == 0)
+        self.live.area.setVisible(side or self.tabs.index == 1)
         if side and self.width() < 1280:
             self.resize(1380, self.height())
 
@@ -132,6 +139,15 @@ class MainWindow(QMainWindow):
 
     def _on_theme(self, *_):
         apply_theme(QApplication.instance(), THEME_CHOICES[self.theme.index][1])
+        self.live.refresh_icons()
+
+    def _transcribe_recording(self, path):
+        """Kaydedici panelindeki kaydı dosya paneline aktar (çevirmeye hazır)."""
+        if self.file.busy():
+            return
+        self.file.set_file(path)
+        if not self.split_btn.isChecked():
+            self.tabs.set_index(0)
 
     def _on_ui_lang(self, *_):
         i18n.set_lang(self.ui_lang.currentData())
@@ -158,6 +174,20 @@ class MainWindow(QMainWindow):
                 return
         self.file.stop_for_quit()
         self.live.stop_for_quit()
+        unsaved = self.live.takes.unsaved()
+        if unsaved:  # kaydedilmemiş kayıtlar: sakla (sonraki açılışta listede) / sil / vazgeç
+            box = QMessageBox(QMessageBox.Icon.Question, tr("quit_title"),
+                              tr("quit_unsaved", n=len(unsaved)), parent=self)
+            keep = box.addButton(tr("quit_keep"), QMessageBox.ButtonRole.AcceptRole)
+            delete = box.addButton(tr("quit_delete"), QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton(QMessageBox.StandardButton.Cancel)
+            box.setDefaultButton(keep)
+            box.exec()
+            if box.clickedButton() is delete:
+                self.live.takes.delete_all_unsaved()
+            elif box.clickedButton() is not keep:
+                e.ignore()
+                return
         st = self.settings
         st.setValue("ui_lang", i18n.get_lang())
         st.setValue("theme", self.theme.index)

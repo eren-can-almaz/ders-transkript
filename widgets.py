@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QGuiApplication, QPalette, QTextCharFormat
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout,
@@ -144,6 +144,41 @@ class SettingsBlock(QVBoxLayout):
         self.lang.setCurrentIndex(get("lang", 0, self.lang.count()))
         self.quality.set_index(get("quality", QUALITY_DEFAULT, len(QUALITY)))
         self.mode.set_index(get("mode", 0, len(MODES)))
+
+
+class Collapsible(QFrame):
+    """Başlığına tıklanınca açılıp kapanan kart; kapalıyken tek satırlık özet gösterir."""
+
+    def __init__(self):
+        super().__init__(objectName="card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 12, 18, 12)
+        lay.setSpacing(10)
+        self.header = QPushButton(objectName="collapse")
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header.clicked.connect(lambda: self.set_open(not self.body.isVisible()))
+        lay.addWidget(self.header)
+        self.body = QFrame()
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSpacing(12)
+        self.body.hide()
+        lay.addWidget(self.body)
+        self.title = ""
+        self.summary = ""
+
+    def set_open(self, on):
+        self.body.setVisible(on)
+        self._render()
+
+    def set_text(self, title, summary):
+        self.title, self.summary = title, summary
+        self._render()
+
+    def _render(self):
+        arrow = "▾" if self.body.isVisible() else "▸"
+        extra = "" if self.body.isVisible() else f"     {self.summary}"
+        self.header.setText(f"{arrow}  {self.title}{extra}")
 
 
 class DropZone(QFrame):
@@ -308,25 +343,57 @@ class TranscriptCard(QFrame):
         sep.setFixedHeight(1)
         lay.addWidget(sep)
         self.text = QPlainTextEdit()
+        self.text.setMinimumHeight(200)
         self.text.textChanged.connect(self._update)
         lay.addWidget(self.text, 1)
         self._copied = False
+        self._draft_at = None  # gri taslağın başladığı karakter konumu (yoksa None)
         self.retranslate()
 
-    def append(self, piece):
+    def _insert_at_end(self, text, fmt):
         sb = self.text.verticalScrollBar()
         at_bottom = sb.value() >= sb.maximum() - 4  # kullanıcı yukarı kaydırdıysa zıplatma
         cur = self.text.textCursor()
         cur.movePosition(cur.MoveOperation.End)
-        cur.insertText(piece)
+        cur.insertText(text, fmt)
         if at_bottom:
             sb.setValue(sb.maximum())
 
+    def _remove_draft(self):
+        if self._draft_at is None:
+            return
+        cur = self.text.textCursor()
+        cur.setPosition(min(self._draft_at, self.text.document().characterCount() - 1))
+        cur.movePosition(cur.MoveOperation.End, cur.MoveMode.KeepAnchor)
+        cur.removeSelectedText()
+        self._draft_at = None
+
+    def append(self, piece):
+        """Kesinleşmiş metni ekler (varsa taslağı kaldırarak)."""
+        self._remove_draft()
+        self._insert_at_end(piece, QTextCharFormat())
+
+    def set_draft(self, text):
+        """Henüz kesinleşmemiş metni sonda gri ve italik gösterir; her çağrıda yenilenir."""
+        self._remove_draft()
+        if not text:
+            return
+        committed = self.text.toPlainText()
+        sep = " " if committed and not committed.endswith(("\n", " ")) else ""
+        fmt = QTextCharFormat()
+        fmt.setForeground(self.text.palette().color(QPalette.ColorRole.PlaceholderText))
+        fmt.setFontItalic(True)
+        self._draft_at = len(committed)
+        self._insert_at_end(sep + text, fmt)
+
     def clear(self):
+        self._draft_at = None
         self.text.clear()
 
     def plain(self):
-        return self.text.toPlainText()
+        """Yalnızca kesinleşmiş metin (kopyala/kaydet bunu kullanır)."""
+        txt = self.text.toPlainText()
+        return txt[: self._draft_at] if self._draft_at is not None else txt
 
     def _update(self):
         txt = self.plain()

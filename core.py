@@ -192,6 +192,11 @@ class ModelCache:
 CACHE = ModelCache()
 
 
+def _norm(text):
+    """Karşılaştırma için: küçük harf, yalnızca harf/rakam ve tek boşluk."""
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in text.lower()).split())
+
+
 def join_piece(text, start, last_end, timestamps):
     """Bir cümleyi öncekiyle birleştirirken boşluk / paragraf / zaman damgası ekler."""
     if timestamps:
@@ -315,137 +320,233 @@ class RecordingWriter:
 
 
 class LiveWorker(QThread):
-    """Mikrofondan gelen sesi duraklamalardan bölüp parça parça metne çevirir.
+    """Mikrofon sesini kaydeder ve/veya canlı metne çevirir.
 
-    Ses arayüz iş parçacığında yakalanıp `feed()` ile kuyruğa konur; bu iş parçacığı
-    parçaları biriktirir, konuşmada ~0,6 sn duraklama olunca (ya da en geç MAX_CHUNK
-    saniyede, en sessiz noktadan) birikeni çevirir. Böylece cümleler ortadan bölünmez.
+    Ses arayüz iş parçacığında yakalanıp `feed()` ile kuyruğa konur. İki katman çalışır:
+      • Kesin metin (bu iş parçacığı): ses, konuşmadaki ~0,5 sn duraklamalardan (ya da en geç
+        MAX_CHUNK saniyede, en sessiz noktadan) bölünüp seçilen kaliteli modelle çevrilir.
+      • Önizleme (ayrı iş parçacığı, küçük model): henüz kesinleşmemiş ses ~her saniye yeniden
+        çevrilir ve gri taslak olarak gösterilir; kesin metin gelince yerini ona bırakır.
+    Whisper her çağrıda 30 sn'lik pencereyi işlediği için çağrı süresi ses uzunluğundan büyük
+    ölçüde bağımsızdır; önizlemenin hızlı modelle yapılmasının nedeni budur.
     """
-    MIN_CHUNK = 2.5      # sn; bundan kısa parçalar duraklama olsa da beklenir
-    MAX_CHUNK = 12.0     # sn; konuşma hiç durmazsa en geç bu uzunlukta kesilir
-    SILENCE_TAIL = 0.6   # sn; parçayı bitiren duraklama
+    MIN_CHUNK = 2.0      # sn; bundan kısa parçalar duraklama olsa da beklenir
+    MAX_CHUNK = 10.0     # sn; konuşma hiç durmazsa en geç bu uzunlukta kesilir
+    SILENCE_TAIL = 0.5   # sn; parçayı bitiren duraklama
     FRAME = 320          # 20 ms
+    DRAFT_MODEL = "small"
+    DRAFT_THREADS = 2
+    DRAFT_MAX = 25       # sn; önizlemeye verilen en uzun ses
 
     ready = pyqtSignal()
-    segment = pyqtSignal(str)
-    processed = pyqtSignal(float)        # metne çevrilen ses süresi (sn, başlangıçtan)
+    segment = pyqtSignal(str)            # kesinleşen metin
+    draft = pyqtSignal(str)              # henüz kesinleşmemiş önizleme ("" = temizle)
+    processed = pyqtSignal(float)        # kesinleşen ses süresi (sn, başlangıçtan)
     info = pyqtSignal(str, str)
     finished_ok = pyqtSignal(str)        # kayıt dosyasının yolu ("" = kayıt yok)
     failed = pyqtSignal(str)
 
-    def __init__(self, model_name, language, timestamps, threads, record_base=None):
+    def __init__(self, model_name, language, timestamps, threads, record_base=None,
+                 transcribe=True, preview=True, draft_interval=1.0):
         super().__init__()
         self.model_name = model_name
         self.language = language
         self.timestamps = timestamps
         self.threads = threads
         self.record_base = record_base
+        self.transcribe = transcribe
+        self.preview = preview and transcribe
+        self.draft_interval = draft_interval
         self.q = queue.Queue()
         self.text_tail = ""
+        # önizleme iş parçacığıyla paylaşılan durum
+        self._lock = threading.Lock()
+        self._pending = np.zeros(0, np.float32)
+        self._inflight = np.zeros(0, np.float32)
+        self._gen = 0                     # her kesinleşmede artar: eski taslaklar gösterilmez
+        self._speech = False
+        self._lang = language
+        self._draft_stop = threading.Event()
+        self._draft_wake = threading.Event()
 
     def feed(self, samples):
         self.q.put(samples)
+
+    def flush(self):
+        self.q.put("FLUSH")  # duraklatınca: birikeni hemen kesinleştir
 
     def stop(self):
         self.q.put(None)  # kuyruktaki ses bitince durur, son parça da çevrilir
 
     def run(self):
-        model = None
-        writer = None
+        model = draft_model = draft_thread = writer = None
         try:
-            model = CACHE.acquire(self.model_name, self.threads,
-                                  on_download=lambda: self.info.emit("downloading_model", ""))
-            writer = RecordingWriter(self.record_base) if self.record_base else None
+            if self.record_base:
+                writer = RecordingWriter(self.record_base)
+            if self.transcribe:
+                model = CACHE.acquire(self.model_name, self.threads,
+                                      on_download=lambda: self.info.emit("downloading_model", ""))
+                if self.preview:
+                    draft_model = CACHE.acquire(self.DRAFT_MODEL, self.DRAFT_THREADS)
+                    draft_thread = threading.Thread(target=self._draft_loop, args=(draft_model,),
+                                                    daemon=True)
+                    draft_thread.start()
             self.ready.emit()
             self._loop(model, writer)
-            if writer:
-                writer.close()
-            self.finished_ok.emit(str(writer.path) if writer else "")
         except Exception as e:
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            writer_path = ""
+        else:
+            writer_path = None
+        finally:
+            self._draft_stop.set()
+            self._draft_wake.set()
+            if draft_thread:
+                draft_thread.join(timeout=30)
             if writer:
                 try:
                     writer.close()
                 except Exception:
                     pass
-            self.failed.emit(f"{type(e).__name__}: {e}")
-        finally:
             if model is not None:
                 CACHE.release(self.model_name, self.threads)
+            if draft_model is not None:
+                CACHE.release(self.DRAFT_MODEL, self.DRAFT_THREADS)
+        if writer_path is None:
+            self.draft.emit("")
+            self.finished_ok.emit(str(writer.path) if writer else "")
 
+    # --- kesin metin --------------------------------------------------------
     def _loop(self, model, writer):
         pending = np.zeros(0, np.float32)
         offset = 0.0                       # pending[0]'ın kayıt başından itibaren zamanı
         recent = deque(maxlen=500)         # son ~10 sn'nin çerçeve enerjileri (gürültü tabanı için)
         last_end = None
-        lang = self.language
         stopping = False
         while not stopping:
             item = self.q.get()
+            flush = False
             if item is None:
                 stopping = True
+            elif isinstance(item, str):
+                flush = True
             else:
                 if writer:
                     writer.write(item)
+                if not self.transcribe:
+                    continue
                 pending = np.concatenate([pending, item])
                 n = len(item) // self.FRAME
                 if n:
                     fr = item[: n * self.FRAME].reshape(n, self.FRAME)
                     recent.extend(np.sqrt((fr ** 2).mean(axis=1)).tolist())
+                with self._lock:
+                    self._pending = pending
                 if not self.q.empty():
                     continue  # kuyrukta daha ses var: önce hepsini topla
+            if not self.transcribe:
+                continue
 
-            cut = self._find_cut(pending, recent, final=stopping)
+            cut = self._find_cut(pending, recent, final=stopping or flush)
             if cut == "drop":  # uzun süredir konuşma yok: sessizliği at
                 keep = int(0.5 * SR)
                 offset += (len(pending) - keep) / SR
                 pending = pending[-keep:]
+                with self._lock:
+                    self._pending, self._speech = pending, False
                 self.processed.emit(offset)
                 continue
             if cut is None:
                 continue
             chunk, pending = pending[:cut], pending[cut:]
-            last_end, lang = self._transcribe(model, chunk, offset, last_end, lang)
+            with self._lock:
+                self._inflight, self._pending = chunk, pending
+            pieces, last_end = self._transcribe(model, chunk, offset, last_end)
             offset += len(chunk) / SR
+            with self._lock:  # önce nesil artar: bu parçanın eski taslağı artık gösterilmez
+                self._gen += 1
+                self._inflight = np.zeros(0, np.float32)
+            for p in pieces:
+                self.segment.emit(p)
             self.processed.emit(offset)
+            self._draft_wake.set()  # kalan ses için taslağı hemen yenile
 
     def _find_cut(self, pending, recent, final):
         L = len(pending) / SR
-        if final:
-            return len(pending) if L > 0.3 else None
+        if final:  # durdururken: kelime ortasında kesilmiş çok kısa kırpıntıyı çevirme
+            return len(pending) if L > 0.8 else None
         if L < 1.0:
             return None
         floor = np.percentile(recent, 20) if recent else 0.0
         thr = max(0.004, floor * 2.5)
         n = len(pending) // self.FRAME
         rms = np.sqrt((pending[: n * self.FRAME].reshape(n, self.FRAME) ** 2).mean(axis=1))
-        speech_frames = int((rms > thr).sum())
-        if speech_frames * self.FRAME / SR < 0.3:
+        speech = int((rms > thr).sum()) * self.FRAME / SR >= 0.3
+        with self._lock:
+            self._speech = speech
+        if not speech:
             return "drop" if L > 5 else None
         tail_frames = int(self.SILENCE_TAIL * SR / self.FRAME)
         if L >= self.MIN_CHUNK and (rms[-tail_frames:] < thr).all():
             return len(pending)
-        if L >= self.MAX_CHUNK:  # konuşma durmuyor: son 4 sn'nin en sessiz yerinden kes
-            lo = max(0, n - int(4 * SR / self.FRAME))
+        if L >= self.MAX_CHUNK:  # konuşma durmuyor: son 3 sn'nin en sessiz yerinden kes
+            lo = max(0, n - int(3 * SR / self.FRAME))
             return (lo + int(np.argmin(rms[lo:]))) * self.FRAME
         return None
 
-    def _transcribe(self, model, chunk, offset, last_end, lang):
+    def _transcribe(self, model, chunk, offset, last_end):
         segments, info = model.transcribe(
-            chunk, language=lang, beam_size=3, vad_filter=True,
+            chunk, language=self._lang, beam_size=3, vad_filter=True,
             condition_on_previous_text=False,
             initial_prompt=self.text_tail[-200:] or None,  # önceki metin: süreklilik ve yazım tutarlılığı
         )
         segs = list(segments)
-        if lang is None and info.language_probability > 0.8 and len(chunk) > 3 * SR:
-            lang = info.language  # dil güvenle belli oldu: sonraki parçalarda tekrar algılama yapma
-            self.info.emit("detected_lang", lang)
+        if self._lang is None and info.language_probability > 0.8 and len(chunk) > 3 * SR:
+            self._lang = info.language  # dil güvenle belli oldu: sonraki parçalarda tekrar algılama yapma
+            self.info.emit("detected_lang", self._lang)
+        pieces = []
         for s in segs:
             text = s.text.strip()
             # sessizlikte uydurulan metni ele ("İzlediğiniz için teşekkürler" vb.)
             if not text or (s.no_speech_prob > 0.6 and s.avg_logprob < -1.0):
                 continue
-            start = offset + s.start
-            self.segment.emit(join_piece(text, start, last_end, self.timestamps))
+            # Whisper bazen önceki metni (initial_prompt) parçanın başında tekrarlar: az önce
+            # yazılmış cümleyi bir daha yazma
+            if len(text) > 8 and _norm(text) in _norm(self.text_tail[-160:]):
+                continue
+            pieces.append(join_piece(text, offset + s.start, last_end, self.timestamps))
             last_end = offset + s.end
             self.text_tail = (self.text_tail + " " + text)[-400:]
-        return last_end, lang
+        return pieces, last_end
+
+    # --- önizleme -----------------------------------------------------------
+    def _draft_loop(self, model):
+        last = None
+        started = 0.0
+        while not self._draft_stop.is_set():
+            # aralık bir önceki taslağın başından sayılır: çeviri sürdüyse beklemeden devam
+            self._draft_wake.wait(max(0.1, self.draft_interval - (time.time() - started)))
+            self._draft_wake.clear()
+            started = time.time()
+            if self._draft_stop.is_set():
+                break
+            with self._lock:
+                audio = np.concatenate([self._inflight, self._pending])
+                gen, speech, lang = self._gen, self._speech, self._lang
+            key = (gen, len(audio))
+            if len(audio) < 0.5 * SR or not speech or key == last:
+                continue
+            last = key
+            try:
+                segs, _ = model.transcribe(
+                    audio[-self.DRAFT_MAX * SR:], language=lang, beam_size=1,
+                    without_timestamps=True, vad_filter=False, condition_on_previous_text=False,
+                    initial_prompt=self.text_tail[-200:] or None)
+                text = " ".join(s.text.strip() for s in segs
+                                if not (s.no_speech_prob > 0.6 and s.avg_logprob < -1.0)).strip()
+            except Exception:
+                continue
+            with self._lock:
+                current = gen == self._gen
+            if current:
+                self.draft.emit(text)

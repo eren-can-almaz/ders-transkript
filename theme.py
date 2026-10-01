@@ -30,6 +30,7 @@ THEMES = {
         "warn": "#fdb022", "live": "#f97066",
     },
 }
+_current_theme = "light"
 THEME_CHOICES = [("theme_system", "system"), ("theme_light", "light"), ("theme_dark", "dark")]
 
 STYLE = """
@@ -118,6 +119,42 @@ QProgressBar#meter::chunk {{ background: {ok}; border-radius: 3px; }}
 QLabel#liveDot {{ color: {live}; font-size: 14px; font-weight: 700; }}
 QLabel#warn {{ color: {warn}; font-size: 12px; font-weight: 600; }}
 QComboBox#small {{ min-width: 90px; padding: 3px 26px 3px 8px; font-size: 12px; }}
+
+QPushButton#recBtn {{
+    background: {card}; border: 2px solid {border_strong}; border-radius: 32px;
+    min-width: 64px; max-width: 64px; min-height: 64px; max-height: 64px; padding: 0;
+}}
+QPushButton#recBtn:hover {{ border-color: {live}; background: {hover}; }}
+QPushButton#recBtn:disabled {{ background: {disabled_bg}; border-color: {border}; }}
+QPushButton#roundBtn {{
+    background: {card}; border: 1px solid {border_strong}; border-radius: 22px;
+    min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px; padding: 0;
+}}
+QPushButton#roundBtn:hover {{ background: {hover}; }}
+QLabel#timer {{ font-size: 30px; font-weight: 700; font-family: "SF Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace; }}
+QLabel#recState {{ color: {muted}; font-size: 12px; font-weight: 700; letter-spacing: 0.8px; }}
+QLabel#recState[on="true"] {{ color: {live}; }}
+QLabel#path {{ color: {muted}; font-size: 12px; }}
+QPushButton#collapse {{
+    background: transparent; border: none; padding: 2px 0; text-align: left;
+    color: {muted}; font-size: 12px; font-weight: 700;
+}}
+QPushButton#collapse:hover {{ color: {text}; background: transparent; }}
+QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+QFrame#takeRow {{ background: transparent; border: 1px solid transparent; border-radius: 8px; }}
+QFrame#takeRow:hover {{ background: {hover}; }}
+QFrame#takeRow[selected="true"] {{ background: {accent_soft}; border-color: {accent}; }}
+QLabel#takeTitle {{ font-weight: 600; }}
+QPushButton#roundSmall {{
+    background: {card}; border: 1px solid {border_strong}; border-radius: 15px;
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0;
+}}
+QPushButton#primarySmall {{ background: {accent}; color: {on_accent}; border: none; padding: 5px 12px; }}
+QPushButton#primarySmall:hover {{ background: {accent_hover}; }}
+QPushButton#dangerSmall {{ background: transparent; color: {danger}; border: 1px solid {danger_border}; padding: 5px 12px; }}
+QPushButton#dangerSmall:hover {{ background: {danger_hover}; }}
+QPushButton#link {{ background: transparent; border: none; color: {accent}; padding: 2px 4px; font-weight: 600; }}
+QPushButton#link:hover {{ text-decoration: underline; background: transparent; }}
 """
 
 
@@ -160,7 +197,9 @@ def apply_theme(app, choice):
     """choice: 'system' | 'light' | 'dark'. Stil dosyası + palet (diyaloglar için) uygulanır."""
     from PyQt6.QtGui import QColor, QPalette
 
+    global _current_theme
     theme = choice if choice in THEMES else ("dark" if system_is_dark() else "light")
+    _current_theme = theme
     c = THEMES[theme]
     pal = QPalette()
     for role, key in [(QPalette.ColorRole.Window, "bg"), (QPalette.ColorRole.Base, "card"),
@@ -199,3 +238,33 @@ def icon_pixmap(size=256):
 def app_icon():
     from PyQt6.QtGui import QIcon
     return QIcon(icon_pixmap(256))
+
+
+def media_icon(kind, color, size=64):
+    """Kayıt düğmesi simgeleri: 'record' (dolu daire), 'stop' (kare), 'pause' (iki çubuk), 'play' (üçgen)."""
+    from PyQt6.QtCore import QPointF, QRectF
+    from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
+
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(color))
+    u = size / 64
+    if kind == "record":
+        p.drawEllipse(QRectF(14 * u, 14 * u, 36 * u, 36 * u))
+    elif kind == "stop":
+        p.drawRoundedRect(QRectF(19 * u, 19 * u, 26 * u, 26 * u), 5 * u, 5 * u)
+    elif kind == "pause":
+        p.drawRoundedRect(QRectF(19 * u, 16 * u, 9 * u, 32 * u), 3 * u, 3 * u)
+        p.drawRoundedRect(QRectF(36 * u, 16 * u, 9 * u, 32 * u), 3 * u, 3 * u)
+    elif kind == "play":
+        p.drawPolygon(QPolygonF([QPointF(22 * u, 15 * u), QPointF(50 * u, 32 * u), QPointF(22 * u, 49 * u)]))
+    p.end()
+    return QIcon(pm)
+
+
+def current_colors():
+    """Şu an uygulanan temanın renkleri (simgeleri temaya göre çizmek için)."""
+    return THEMES[_current_theme]
