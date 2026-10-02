@@ -206,27 +206,86 @@ class VoiceClone:
         return np.concatenate(pieces) if pieces else np.zeros(0, np.float32)
 
 
-_MODEL = {}  # yüklü model (yükleme ~1 dk): analiz penceresi açıkken tekrar kullanılır
+# ---------------------------------------------------------------- ayrı süreç
+# Model yükleme (~1 dk) Python kilidini (GIL) bırakmadığı için iş parçacığında arayüzü dondurur
+# ("yanıt vermiyor"). Bu yüzden klonlama ayrı bir süreçte çalışır: arayüz akıcı kalır, "Durdur"
+# süreci anında keser, pencere kapanınca süreç biter ve bellek (~2 GB) tamamen geri verilir.
+
+def _server(req_q, resp_q, threads):
+    try:
+        model = VoiceClone(threads)
+    except Exception as e:
+        resp_q.put(("failed", None, f"{type(e).__name__}: {e}"))
+        return
+    resp_q.put(("ready", None, None))
+    while True:
+        msg = req_q.get()
+        if msg is None:
+            return
+        job, ref24, text, lang = msg
+        try:
+            resp_q.put(("progress", job, ("speaker", 0.0)))
+            model.set_speaker(ref24)
+            wav = model.synthesize(text, lang, progress=lambda f: resp_q.put(("progress", job, ("synth", f))))
+            resp_q.put(("done", job, wav))
+        except Exception as e:
+            resp_q.put(("failed", job, f"{type(e).__name__}: {e}"))
 
 
-def get_model(threads):
-    m = _MODEL.get(threads)
-    if m is None:
-        _MODEL.clear()
-        m = _MODEL[threads] = VoiceClone(threads)
-    return m
+class CloneServer:
+    """Klonlama süreci (analiz penceresi açıkken yaşar; model bir kez yüklenir)."""
+
+    def __init__(self, threads):
+        import multiprocessing as mp
+        ctx = mp.get_context("spawn")
+        self.req, self.resp = ctx.Queue(), ctx.Queue()
+        for q in (self.req, self.resp):  # süreç ölse bile çıkışta okunmamış veriyi bekleyip asılı kalma
+            q.cancel_join_thread()
+        self.proc = ctx.Process(target=_server, args=(self.req, self.resp, threads), daemon=True)
+        self.proc.start()
+        self.ready = False
+        self.threads = threads
+
+    def alive(self):
+        return self.proc.is_alive()
+
+    def stop(self):
+        try:
+            self.req.put(None)
+            self.proc.join(1.0)
+        except Exception:
+            pass
+        if self.proc.is_alive():
+            self.proc.terminate()
+            self.proc.join(2.0)
+
+
+_SERVER = {"s": None}
+
+
+def get_server(threads):
+    s = _SERVER["s"]
+    if s is None or not s.alive() or s.threads != threads:
+        if s is not None:
+            s.stop()
+        s = _SERVER["s"] = CloneServer(threads)
+    return s
 
 
 def release_model():
-    """Analiz penceresi kapanınca ~1,5–2 GB bellek geri verilsin."""
-    _MODEL.clear()
+    """Analiz penceresi kapanınca klonlama süreci biter; bellek tamamen geri verilir."""
+    s = _SERVER["s"]
+    _SERVER["s"] = None
+    if s is not None:
+        s.stop()
 
 
 class CloneWorker(QThread):
-    """Arka planda: konuşmacıyı öğren → metni o sesle üret."""
+    """Arayüz tarafı: isteği klonlama sürecine gönderir, ilerlemeyi ve sonucu sinyal olarak verir."""
     progress = pyqtSignal(float, str)
     done = pyqtSignal(object)  # 24 kHz float32
     failed = pyqtSignal(str)
+    _job = 0
 
     def __init__(self, reference_16k, text, lang, threads):
         super().__init__()
@@ -234,17 +293,39 @@ class CloneWorker(QThread):
         self.cancelled = False
 
     def run(self):
+        import queue as _q
         try:
-            self.progress.emit(0.0, "load")
-            vc = get_model(self.threads)
             ref = best_reference(self.ref, 16000)
             ref24 = np.interp(np.linspace(0, len(ref) - 1, int(len(ref) * SR / 16000)),
                               np.arange(len(ref)), ref).astype(np.float32)
-            self.progress.emit(0.0, "speaker")
-            vc.set_speaker(ref24)
-            wav = vc.synthesize(self.text, self.lang, progress=lambda f: self.progress.emit(f, "synth"),
-                                cancel=lambda: self.cancelled)
-            if wav is not None:
-                self.done.emit(wav)
+            srv = get_server(self.threads)
+            CloneWorker._job += 1
+            job = CloneWorker._job
+            if not srv.ready:
+                self.progress.emit(0.0, "load")
+            srv.req.put((job, ref24, self.text, self.lang))
+            while True:
+                if self.cancelled:  # durdur: süreci kes (model bir sonraki üretimde yeniden yüklenir)
+                    release_model()
+                    return
+                if not srv.alive():
+                    raise RuntimeError("clone process exited")
+                try:
+                    kind, j, payload = srv.resp.get(timeout=0.2)
+                except _q.Empty:
+                    continue
+                if kind == "ready":
+                    srv.ready = True
+                    continue
+                if j is not None and j != job:
+                    continue  # eski bir isteğin geç gelen mesajı
+                if kind == "progress":
+                    stage, f = payload
+                    self.progress.emit(f, stage)
+                elif kind == "done":
+                    self.done.emit(payload)
+                    return
+                elif kind == "failed":
+                    raise RuntimeError(payload)
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")

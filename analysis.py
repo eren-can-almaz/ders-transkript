@@ -706,11 +706,15 @@ class AnalysisWindow(QWidget):
         self.vc_text = QPlainTextEdit()
         self.vc_text.setPlaceholderText(tr("vc_text_ph"))
         self.vc_text.setFixedHeight(110)
+        self._vc_prog_set = False   # metin programla mı değişti
+        self._vc_user_edited = False
+        self.vc_text.textChanged.connect(
+            lambda: None if self._vc_prog_set else setattr(self, "_vc_user_edited", True))
         self.vc_text.setStyleSheet("QPlainTextEdit { background: palette(alternate-base); border-radius: 8px; padding: 6px; }")
         vb.addWidget(self.vc_text)
         row = QHBoxLayout()
         self.vc_get = QPushButton(tr("vc_get_text"), objectName="plain")
-        self.vc_get.clicked.connect(self._get_segment_text)
+        self.vc_get.clicked.connect(lambda: self._fill_from_segment(force=True))
         self.vc_lang = QComboBox()
         for code in ("tr", "en", "de", "fr", "es", "it", "pt", "nl", "pl", "ru", "ar", "el", "sv", "no",
                      "da", "fi", "he", "hi", "ja", "ko", "ms", "sw", "zh"):
@@ -729,6 +733,8 @@ class AnalysisWindow(QWidget):
         self.vc_status.setWordWrap(True)
         f.addWidget(self.vc_status)
         self._refresh_clone_section()
+        if voiceclone.installed():
+            self._prefill_clone()
 
     def _refresh_clone_section(self):
         import voiceclone
@@ -741,26 +747,56 @@ class AnalysisWindow(QWidget):
         self.vc_dl = d = voiceclone.Downloader()
         _keep_alive(d)
         d.progress.connect(lambda x: self.vc_status.setText(tr("vc_downloading", p=int(x * 100))))
-        d.done.connect(lambda: (self.vc_status.setText(""), self._refresh_clone_section()))
+        d.done.connect(lambda: (self.vc_status.setText(""), self._refresh_clone_section(), self._prefill_clone()))
         d.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
         d.finished.connect(lambda: (setattr(self, "vc_dl", None), self._refresh_clone_section()))
         self.vc_install.hide()
         self.vc_status.setText(tr("vc_downloading", p=0))
         d.start()
 
-    def _get_segment_text(self):
-        """Bölümü (Standart model) yazıya dök ve metin kutusuna koy."""
+    def _set_vc_text(self, text):
+        self._vc_prog_set = True
+        self.vc_text.setPlainText(text)
+        self._vc_prog_set = False
+
+    def _prefill_clone(self):
+        """Varsayılan: kaydın zaten yazıya dökülmüş metni (bölüm kaydın tamamıysa) ve algılanan dil.
+        Bölüm kaydın bir parçasıysa o parça arka planda yazıya dökülür. Kullanıcı değiştirebilir."""
+        p = self.params()
+        dur = self.item.duration or 0
+        whole = p["start"] <= 0.5 and p["start"] + p["length"] >= dur - 0.5
+        if whole and self.item.text.strip() and not self._vc_user_edited:
+            self._set_vc_text(self.item.text.strip())
+            self._fill_from_segment(force=False, text_too=False)  # yalnızca dili algıla
+        else:
+            self._fill_from_segment(force=False)
+
+    def _fill_from_segment(self, force, text_too=True):
+        """Bölümü (Standart model) yazıya dök: dili seç, metni kutuya koy (force değilse kullanıcının
+        yazdığına dokunma). Dil otomatik algılanır."""
         from core import FileWorker, MODES
         if self.vc_tr_worker is not None:
             return
         p = self.params()
-        lang = self.vc_lang.currentData()
-        w = self.vc_tr_worker = FileWorker(str(self.path), "small", lang, False, MODES[1][1],
+        w = self.vc_tr_worker = FileWorker(str(self.path), "small", None, False, MODES[1][1],
                                            clip=(p["start"], p["start"] + p["length"]))
         _keep_alive(w)
         pieces = []
         w.segment.connect(pieces.append)
-        w.finished_ok.connect(lambda _e: self.vc_text.setPlainText("".join(pieces).strip()))
+
+        def on_info(key, value):
+            if key == "detected_lang":
+                i = self.vc_lang.findData(value)
+                if i >= 0:
+                    self.vc_lang.setCurrentIndex(i)
+
+        def on_done(_elapsed):
+            if text_too and (force or not self._vc_user_edited):
+                self._set_vc_text("".join(pieces).strip())
+                if force:
+                    self._vc_user_edited = False
+        w.info.connect(on_info)
+        w.finished_ok.connect(on_done)
         w.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
         w.finished.connect(lambda: (setattr(self, "vc_tr_worker", None), self.vc_get.setEnabled(True),
                                     self.vc_status.setText("")))
@@ -892,8 +928,7 @@ class AnalysisWindow(QWidget):
         for v in (self.v_before, self.v_after, self.v_diff, self.v_clone):
             v.clear()
         shutil.rmtree(self.tmp, ignore_errors=True)
-        if self.vc_worker is None or not self.vc_worker.isRunning():
-            import voiceclone
-            voiceclone.release_model()
+        import voiceclone
+        voiceclone.release_model()  # klonlama süreci biter, bellek tamamen geri verilir
         release_memory()
         e.accept()
