@@ -6,7 +6,11 @@ UI_LANGUAGES = [("tr", "Türkçe"), ("en", "English"), ("de", "Deutsch")]
 STRINGS = {
     "tr": {
         "app_title": "Ders Transkript",
-        "offline": "İnternetsiz çalışır",
+        "offline": "İnternetsiz çalışır", "version": "Sürüm {v}",
+        "upd_check": "Yeni sürümleri denetle",
+        "upd_hint": "Açılışta yalnızca GitHub'daki son sürüm numarasına bakılır; kayıtlarınız ve metinleriniz hiçbir yere gönderilmez.",
+        "upd_title": "Yeni sürüm", "upd_body": "Ders Transkript {new} yayımlandı (sizdeki: {cur}).\n\nİndirme sayfası açılsın mı?",
+        "upd_download": "İndir", "upd_later": "Sonra", "upd_skip": "Bu sürümü atla",
         "months": "Ocak,Şubat,Mart,Nisan,Mayıs,Haziran,Temmuz,Ağustos,Eylül,Ekim,Kasım,Aralık",
         "theme_system": "Sistem", "theme_light": "Açık", "theme_dark": "Koyu",
 
@@ -122,7 +126,11 @@ STRINGS = {
     },
     "en": {
         "app_title": "Lecture Transcriber",
-        "offline": "Works offline",
+        "offline": "Works offline", "version": "Version {v}",
+        "upd_check": "Check for new versions",
+        "upd_hint": "At startup only the latest version number on GitHub is checked; your recordings and texts are never sent anywhere.",
+        "upd_title": "New version", "upd_body": "Lecture Transcriber {new} is available (you have {cur}).\n\nOpen the download page?",
+        "upd_download": "Download", "upd_later": "Later", "upd_skip": "Skip this version",
         "months": "January,February,March,April,May,June,July,August,September,October,November,December",
         "theme_system": "System", "theme_light": "Light", "theme_dark": "Dark",
 
@@ -228,7 +236,11 @@ STRINGS = {
     },
     "de": {
         "app_title": "Vorlesungs-Transkript",
-        "offline": "Funktioniert offline",
+        "offline": "Funktioniert offline", "version": "Version {v}",
+        "upd_check": "Nach neuen Versionen suchen",
+        "upd_hint": "Beim Start wird nur die neueste Versionsnummer auf GitHub abgefragt; Aufnahmen und Texte werden nirgendwohin gesendet.",
+        "upd_title": "Neue Version", "upd_body": "Ders Transkript {new} ist verfügbar (installiert: {cur}).\n\nDownload-Seite öffnen?",
+        "upd_download": "Herunterladen", "upd_later": "Später", "upd_skip": "Diese Version überspringen",
         "months": "Januar,Februar,März,April,Mai,Juni,Juli,August,September,Oktober,November,Dezember",
         "theme_system": "System", "theme_light": "Hell", "theme_dark": "Dunkel",
 

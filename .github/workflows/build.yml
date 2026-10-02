@@ -49,6 +49,11 @@ jobs:
           done
           python tools/quantize_ct2.py models/large-v3-turbo  # 1,6 GB -> 0,8 GB
 
+      - name: Sürüm numarası (v1.2 etiketi -> "1.2"; elle başlatılan denemede "dev")
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: sed -i.bak 's/^VERSION = .*/VERSION = "${GITHUB_REF_NAME#v}"/' version.py && cat version.py
+
       - run: pyinstaller --noconfirm DersTranskript.spec
 
       - name: Windows - paketi test et

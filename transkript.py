@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QSettings, QSize, Qt, QUrl
+from PyQt6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
@@ -23,6 +23,7 @@ from i18n import UI_LANGUAGES, tr
 from library import Item, Library
 from theme import THEME_CHOICES, app_icon, apply_theme, colors, glyph, icon_pixmap
 from ui_parts import ItemRow
+from version import VERSION
 from views import ItemView
 
 
@@ -114,6 +115,13 @@ class SettingsDialog(QDialog):
         lay.addLayout(grid)
         self.offline = QLabel(objectName="faint")
         lay.addWidget(self.offline)
+        self.upd = QCheckBox(objectName="switch")
+        self.upd.setChecked(win.settings.value("updates/check", True, type=bool))
+        self.upd.toggled.connect(lambda on: win.settings.setValue("updates/check", on))
+        lay.addWidget(self.upd)
+        self.upd_hint = QLabel(objectName="faint")
+        self.upd_hint.setWordWrap(True)
+        lay.addWidget(self.upd_hint)
 
         # ---- gelişmiş
         sep = QFrame(objectName="sep")
@@ -219,7 +227,9 @@ class SettingsDialog(QDialog):
         self.folder.setToolTip(str(self.win.folder))
         self.change.setText(tr("change"))
         self.open.setText(tr("open"))
-        self.offline.setText("●  " + tr("offline"))
+        self.offline.setText("●  " + tr("offline") + "   ·   " + tr("version", v=VERSION))
+        self.upd.setText(tr("upd_check"))
+        self.upd_hint.setText(tr("upd_hint"))
         self.close_btn.setText(tr("close"))
         self.adv.setText(tr("adv_enable"))
         self.adv_hint.setText(tr("adv_hint"))
@@ -303,6 +313,8 @@ class MainWindow(QMainWindow):
 
         for it in self.lib.items:
             self._add_row(it, top=False)
+        if VERSION != "dev" and self.settings.value("updates/check", True, type=bool):
+            QTimer.singleShot(4000, self._check_updates)  # açılışı yavaşlatmasın
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self._shortcut_record)
         try:  # "Sistem" seçiliyken işletim sistemi teması değişirse uygula
             QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: self._apply_theme())
@@ -450,6 +462,29 @@ class MainWindow(QMainWindow):
     def _open_settings(self):
         SettingsDialog(self).exec()
 
+    def _check_updates(self):
+        from updates import UpdateChecker
+        self._updater = UpdateChecker(self)
+        self._updater.found.connect(self._on_update)
+        self._updater.check()
+
+    def _on_update(self, tag):
+        if self.settings.value("updates/skip", "") == tag:
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("upd_title"))
+        box.setText(tr("upd_body", new=tag.lstrip("vV"), cur=VERSION))
+        get = box.addButton(tr("upd_download"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("upd_later"), QMessageBox.ButtonRole.RejectRole)
+        skip = box.addButton(tr("upd_skip"), QMessageBox.ButtonRole.DestructiveRole)
+        box.setDefaultButton(get)
+        box.exec()
+        if box.clickedButton() is get:
+            from updates import PAGE
+            QDesktopServices.openUrl(QUrl(PAGE))  # her zaman sabit adres: cevaptaki bağlantıya güvenilmez
+        elif box.clickedButton() is skip:
+            self.settings.setValue("updates/skip", tag)
+
     def set_theme(self, i):
         self.theme_index = i
         self.settings.setValue("theme", i)
@@ -551,8 +586,27 @@ def selftest(audio=None):
         text = " ".join(s.text.strip() for s in segs)
         print(f"{name}: ses {len(data) / 16000:.1f} sn, dil {info.language}: {text[:200]!r}", flush=True)
         del model
+    _selftest_update()
     _selftest_mic()
     print("SELFTEST OK", flush=True)
+
+
+def _selftest_update():
+    """Güncelleme denetimi: Qt'nin HTTPS (TLS) katmanı pakette çalışıyor mu? Derleme sunucusunda (CI) zorunlu."""
+    from PyQt6.QtCore import QCoreApplication, QTimer
+    from updates import UpdateChecker
+
+    app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+    got = []
+    c = UpdateChecker()
+    c.done.connect(lambda st: (got.append(st), app.quit()))
+    c.check()
+    QTimer.singleShot(15000, app.quit)
+    app.exec()
+    status = got[0] if got else None
+    print(f"sürüm {VERSION}, güncelleme denetimi: HTTP {status}", flush=True)
+    if status is None and os.environ.get("CI"):
+        raise SystemExit("güncelleme denetimi: bağlantı kurulamadı (TLS?)")
 
 
 def _selftest_mic():
