@@ -1,7 +1,9 @@
 faster-whisper==1.2.1
 ctranslate2==4.8.2
 av==19.0.0
-onnxruntime==1.30.0
+# yalnızca ses algılama (VAD) için; 1.24+ Intel Mac desteğini bıraktı
+onnxruntime==1.30.0; sys_platform != "darwin"
+onnxruntime==1.23.2; sys_platform == "darwin"
 PyQt6==6.11.0
 numpy<3
 pyinstaller

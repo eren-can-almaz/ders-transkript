@@ -543,12 +543,14 @@ def selftest(audio=None):
     for name, _ in QUALITY:
         path = model_path(name)
         print(f"model {name}: {path} -> {'VAR' if (path / 'model.bin').exists() else 'YOK'}", flush=True)
-    model = WhisperModel(str(model_path("small")), device="cpu", compute_type="int8",
-                         cpu_threads=MODES[0][1])
     data = decode_audio(audio)[: 16000 * 30]
-    segs, info = model.transcribe(data, beam_size=1, vad_filter=True)
-    text = " ".join(s.text.strip() for s in segs)
-    print(f"ses {len(data) / 16000:.1f} sn, dil {info.language}: {text[:200]!r}", flush=True)
+    for name, _ in QUALITY:  # pakete gömülü her kalite modeli yüklenebilmeli
+        model = WhisperModel(str(model_path(name)), device="cpu", compute_type="int8",
+                             cpu_threads=MODES[0][1])
+        segs, info = model.transcribe(data, beam_size=1, vad_filter=True)
+        text = " ".join(s.text.strip() for s in segs)
+        print(f"{name}: ses {len(data) / 16000:.1f} sn, dil {info.language}: {text[:200]!r}", flush=True)
+        del model
     _selftest_mic()
     print("SELFTEST OK", flush=True)
 

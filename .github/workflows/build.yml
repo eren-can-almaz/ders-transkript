@@ -1,35 +1,53 @@
-# Windows exe ve macOS (Apple Silicon) uygulamasını GitHub'ın ücretsiz sunucularında derler.
-# Actions sekmesinden "Run workflow" ile elle başlatılır; sonuçlar "Artifacts" altından indirilir.
+# Windows, macOS (Apple Silicon + Intel) ve Linux paketlerini GitHub'ın ücretsiz sunucularında derler.
+# Modeller pakete gömülür: kullanıcı indirir, açar, çalıştırır (ayrıca kurulum yok).
+#   - Actions sekmesinden "Run workflow": paketler "Artifacts" altına konur (deneme için).
+#   - "v1.0" gibi bir etiket gönderilince (git tag v1.0 && git push origin v1.0): paketler
+#     Releases sayfasına herkesin indirebileceği dosyalar olarak yüklenir.
+# GitHub Releases'te dosya başına sınır 2 GiB; bu yüzden large-v3-turbo diskte int8 saklanır
+# (uygulama modelleri zaten int8 ile çalıştırır) ve paket boyutu derlemede denetlenir.
 name: Build
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - { os: windows-latest, asset: DersTranskript-windows.zip }
+          - { os: macos-14,       asset: DersTranskript-mac-apple-silicon.dmg }
+          - { os: macos-15-intel, asset: DersTranskript-mac-intel.dmg }
+          - { os: ubuntu-22.04,   asset: DersTranskript-linux.tar.gz }  # glibc 2.35: Ubuntu 22.04+, Debian 12+, Fedora 36+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
+
+      - name: Linux - sistem kütüphaneleri
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libegl1 libpulse0
+
       - run: pip install -r requirements.txt
 
       - name: Modelleri indir
         shell: bash
         run: |
           set -e
-          mkdir -p models/large-v3-turbo models/small
+          mkdir -p models/large-v3-turbo
           for f in config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin; do
-            curl -sfL -o models/large-v3-turbo/$f https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main/$f
+            curl -sfL --retry 3 -o models/large-v3-turbo/$f https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main/$f
           done
           for m in small base tiny; do  # small: Standart kalite; base/tiny: canlı önizleme
             mkdir -p models/$m
             for f in config.json tokenizer.json vocabulary.txt model.bin; do
-              curl -sfL -o models/$m/$f https://huggingface.co/Systran/faster-whisper-$m/resolve/main/$f
+              curl -sfL --retry 3 -o models/$m/$f https://huggingface.co/Systran/faster-whisper-$m/resolve/main/$f
             done
           done
+          python tools/quantize_ct2.py models/large-v3-turbo  # 1,6 GB -> 0,8 GB
 
       - run: pyinstaller --noconfirm DersTranskript.spec
 
@@ -41,27 +59,58 @@ jobs:
           Get-Content selftest.log
           if ($p.ExitCode -ne 0) { exit 1 }
           if (-not (Select-String -Path selftest.log -Pattern "SELFTEST OK")) { exit 1 }
-
       - name: macOS - paketi test et
         if: runner.os == 'macOS'
         run: dist/DersTranskript.app/Contents/MacOS/DersTranskript --selftest | tee /dev/stderr | grep -q "SELFTEST OK"
+      - name: Linux - paketi test et
+        if: runner.os == 'Linux'
+        run: QT_QPA_PLATFORM=offscreen dist/DersTranskript/DersTranskript --selftest | tee /dev/stderr | grep -q "SELFTEST OK"
 
+      - name: Windows - zip
+        if: runner.os == 'Windows'
+        run: 7z a -tzip -mx=1 ${{ matrix.asset }} .\dist\DersTranskript
       - name: macOS - imzala ve DMG oluştur
         if: runner.os == 'macOS'
         run: |
           codesign --force --deep --sign - dist/DersTranskript.app
           mkdir dmg && cp -R dist/DersTranskript.app dmg/ && ln -s /Applications dmg/Applications
-          hdiutil create -volname "Ders Transkript" -srcfolder dmg -ov -format UDZO DersTranskript-mac.dmg
+          hdiutil create -volname "Ders Transkript" -srcfolder dmg -ov -format UDZO ${{ matrix.asset }}
+      - name: Linux - tar.gz
+        if: runner.os == 'Linux'
+        run: |
+          cp assets/icon.png packaging/linux/kur.sh dist/DersTranskript/
+          chmod +x dist/DersTranskript/kur.sh
+          tar -C dist -czf ${{ matrix.asset }} DersTranskript
+
+      - name: Boyut denetimi (GitHub Releases sınırı 2 GiB)
+        shell: bash
+        run: |
+          size=$(python -c "import os; print(os.path.getsize('${{ matrix.asset }}'))")
+          echo "${{ matrix.asset }}: $((size / 1000000)) MB"
+          [ "$size" -lt 2147483648 ]
 
       - uses: actions/upload-artifact@v4
-        if: runner.os == 'Windows'
         with:
-          name: DersTranskript-windows
-          path: dist/DersTranskript
-          compression-level: 1
-      - uses: actions/upload-artifact@v4
-        if: runner.os == 'macOS'
-        with:
-          name: DersTranskript-mac
-          path: DersTranskript-mac.dmg
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
           compression-level: 0
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          body: |
+            Bilgisayarınıza uygun dosyayı indirin; modeller içinde, internet ve ek kurulum gerekmez.
+            - **Windows:** `DersTranskript-windows.zip` → zip'i açın → `DersTranskript.exe`
+            - **Mac (M1/M2/M3/M4):** `DersTranskript-mac-apple-silicon.dmg` (macOS 14+)
+            - **Mac (Intel):** `DersTranskript-mac-intel.dmg`
+            - **Linux:** `DersTranskript-linux.tar.gz` → açın → `./kur.sh` (menüye ekler)
+            İlk açılışta çıkan güvenlik uyarısı için README'deki adımlara bakın.
