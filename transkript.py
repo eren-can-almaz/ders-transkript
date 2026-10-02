@@ -53,7 +53,7 @@ class EmptyState(QWidget):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setIconSize(QSize(24, 24))
             b.setFixedWidth(320)
-            b.clicked.connect(fn)
+            b.clicked.connect(lambda _=False, fn=fn: fn())  # clicked(bool) parametre olarak geçmesin
             col.addWidget(b, alignment=Qt.AlignmentFlag.AlignHCenter)
         outer.addLayout(col)
         outer.addStretch(3)

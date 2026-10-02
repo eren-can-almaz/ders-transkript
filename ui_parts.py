@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPalette, QTextCharFormat
+from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPalette, QPen, QTextCharFormat
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QAbstractButton, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
@@ -715,3 +715,51 @@ class WaveView(QWidget):
             self.v0 = min(max(0.0, anchor - frac * new), max(0.0, self.duration - new))
             self.v1 = self.v0 + new
         self.update()
+
+
+class RingProgress(QWidget):
+    """Yuvarlak yüzde göstergesi: halka + ortada yüzde. Değer değişimleri yumuşak canlandırılır."""
+
+    def __init__(self, size=84, width=6):
+        super().__init__()
+        self.setFixedSize(size, size)
+        self._w = width
+        self._v = 0.0
+        self._anim = QVariantAnimation(self, duration=400)
+        self._anim.valueChanged.connect(self._set)
+
+    def _set(self, v):
+        self._v = float(v)
+        self.update()
+
+    def set_value(self, frac):
+        frac = max(0.0, min(1.0, frac))
+        self._anim.stop()
+        self._anim.setStartValue(self._v)
+        self._anim.setEndValue(frac)
+        self._anim.start()
+
+    def reset(self):
+        self._anim.stop()
+        self._v = 0.0
+        self.update()
+
+    def paintEvent(self, e):
+        from PyQt6.QtGui import QFont
+        c = colors()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        m = self._w / 2 + 1
+        r = QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m)
+        pen = QPen(QColor(c["fill2"]), self._w)
+        p.setPen(pen)
+        p.drawEllipse(r)
+        pen = QPen(QColor(c["accent"]), self._w, cap=Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.drawArc(r, 90 * 16, -int(self._v * 360 * 16))  # tepeden saat yönünde
+        f = QFont(self.font())
+        f.setBold(True)
+        f.setPixelSize(max(11, int(self.height() * 0.24)))
+        p.setFont(f)
+        p.setPen(QColor(c["text"]))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, f"%{int(round(self._v * 100))}")

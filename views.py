@@ -23,7 +23,7 @@ from core import SR, FileWorker, LiveWorker, fmt_time
 from i18n import fmt_date, tr
 from library import unsaved_dir
 from theme import colors, glyph
-from ui_parts import Options, PeaksWorker, PlayerBar, RecordButton, TranscriptBox, Waveform, WaveView, repolish
+from ui_parts import Options, PeaksWorker, PlayerBar, RecordButton, RingProgress, TranscriptBox, Waveform, WaveView, repolish
 
 STEPS = ["step_model", "step_read", "step_transcribe"]
 
@@ -108,10 +108,13 @@ class ItemView(QWidget):
         self.pause_btn.clicked.connect(self.toggle_pause)
         self.rec_btn = RecordButton()
         self.rec_btn.clicked.connect(self.toggle_record)
+        self.ring = RingProgress(84)  # durdurunca: kalan işlemin yüzde kaçı tamamlandı
+        self.ring.hide()
         self._spacer = QWidget()
         self._spacer.setFixedSize(44, 44)  # düğmeyi ortada tutmak için duraklat düğmesiyle simetrik
         controls.addWidget(self.pause_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         controls.addWidget(self.rec_btn)
+        controls.addWidget(self.ring)
         controls.addWidget(self._spacer)
         controls.addStretch()
         rb.addSpacing(6)
@@ -184,11 +187,11 @@ class ItemView(QWidget):
         tl.setSpacing(10)
         self.tr_btn = QPushButton(objectName="primary")
         self.tr_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.tr_btn.clicked.connect(self.transcribe)
+        self.tr_btn.clicked.connect(lambda: self.transcribe())  # clicked(bool) clip'e geçmesin
         tl.addWidget(self.tr_btn)
         self.an_btn = QPushButton(objectName="tinted")
         self.an_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.an_btn.clicked.connect(self.open_analysis)
+        self.an_btn.clicked.connect(lambda: self.open_analysis())  # clicked(bool) start'a geçmesin
         tl.addWidget(self.an_btn)
         tl.addStretch()
         lay.addWidget(self.tr_row)
@@ -226,9 +229,12 @@ class ItemView(QWidget):
         prow = QHBoxLayout()
         self.prog_step = QLabel(objectName="muted")
         self.prog_pct = QLabel(objectName="sectionTitle")
+        self.prog_ring = RingProgress(46, 4)
+        prow.addWidget(self.prog_ring)
+        prow.addSpacing(6)
         prow.addWidget(self.prog_step)
         prow.addStretch()
-        prow.addWidget(self.prog_pct)
+        self.prog_pct.hide()
         pl.addLayout(prow)
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
@@ -397,6 +403,11 @@ class ItemView(QWidget):
         self.pause_btn.setToolTip(tr("resume_tip" if self.paused else "pause_tip"))
         self.rec_btn.setToolTip(tr("rec_stop_tip" if active else "rec_start_tip"))
         self.rec_btn.setEnabled(st != "finishing" and (bool(self._devices) or active))
+        finishing = st == "finishing" and self.live_text.isChecked()
+        self.rec_btn.setVisible(not finishing)
+        self.ring.setVisible(finishing)
+        if finishing:
+            self._update_ring()  # durum metni yüzdeyle birlikte
         self.live_text.setEnabled(st == "new")
         self.live_hint.setText(tr("live_text_on" if self.live_text.isChecked() else "live_text_off"))
         self.live_hint.setVisible(st == "new")
@@ -442,7 +453,7 @@ class ItemView(QWidget):
         w.ready.connect(lambda: self._set_rec_state("recording") if self.rec_state == "loading" else None)
         w.segment.connect(self.box.append)
         w.draft.connect(self.box.set_draft)
-        w.processed.connect(lambda s: setattr(self, "processed", s))
+        w.processed.connect(self._on_processed)
         w.info.connect(lambda k, v: self._set_note(tr(k, v=v)))
         w.finished_ok.connect(self._on_rec_done)
         w.failed.connect(self._on_rec_fail)
@@ -483,6 +494,8 @@ class ItemView(QWidget):
         if self.mic:
             self.mic.stop()
             self.mic = None
+        self.ring.reset()
+        self._update_ring()
         self.paused = False
         self.rec_btn.set_recording(False)
         self._set_rec_state("finishing")
@@ -497,6 +510,17 @@ class ItemView(QWidget):
         self.wave.add((db + 55) / 50)
         if self.live_worker:
             self.live_worker.feed(a)
+
+    def _on_processed(self, sec):
+        self.processed = sec
+        if self.rec_state == "finishing":
+            self._update_ring()
+
+    def _update_ring(self):
+        """Durdurulduktan sonra: kaydedilen sesin yüzde kaçı yazıya döküldü."""
+        frac = self.processed / self.captured if self.captured > 0 else 1.0
+        self.ring.set_value(frac)
+        self.status.setText(tr("st_finishing_pct", p=int(round(frac * 100))))
 
     def _tick(self):
         if self.recording():
@@ -572,6 +596,7 @@ class ItemView(QWidget):
         self._t_start = time.time()
         self._t_upd = self._eta = None
         self.prog.show()
+        self.prog_ring.reset()
         self.bar.setRange(0, 0)
         self.prog_pct.setText("")
         self.prog_info.setText("")
@@ -592,7 +617,7 @@ class ItemView(QWidget):
     def _on_progress(self, done, total):
         frac = min(done / total, 1.0) if total > 0 else 0.0
         self.bar.setValue(int(frac * 1000))
-        self.prog_pct.setText(f"%{int(frac * 100)}")
+        self.prog_ring.set_value(frac)
         self.row_status.emit(f"%{int(frac * 100)}", "busy")
         self._prog_audio = tr("progress_fmt", done=fmt_time(done), total=fmt_time(total))
         elapsed = time.time() - self._t_tr

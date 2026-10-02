@@ -521,8 +521,8 @@ class LiveWorker(QThread):
                     recent.extend(np.sqrt((fr ** 2).mean(axis=1)).tolist())
                 with self._lock:
                     self._pending = pending
-                if not self.q.empty():
-                    continue  # kuyrukta daha ses var: önce hepsini topla
+                if not self.q.empty() and len(pending) < self.MAX_CHUNK * SR:
+                    continue  # kuyrukta daha ses var: önce topla (ama birikmişi tek dev parça yapma)
             if not self.transcribe:
                 continue
 
@@ -540,7 +540,8 @@ class LiveWorker(QThread):
             chunk, pending = pending[:cut], pending[cut:]
             with self._lock:
                 self._inflight, self._pending = chunk, pending
-            pieces, last_end = self._transcribe(model, chunk, offset, last_end)
+            pieces, last_end = self._transcribe(model, chunk, offset, last_end,
+                                                on_seg=lambda t: self.processed.emit(t))
             offset += len(chunk) / SR
             with self._lock:  # önce nesil artar: bu parçanın eski taslağı artık gösterilmez
                 self._gen += 1
@@ -573,18 +574,17 @@ class LiveWorker(QThread):
             return (lo + int(np.argmin(rms[lo:]))) * self.FRAME
         return None
 
-    def _transcribe(self, model, chunk, offset, last_end):
+    def _transcribe(self, model, chunk, offset, last_end, on_seg=None):
         segments, info = model.transcribe(
             chunk, language=self._lang, beam_size=self.BEAM, vad_filter=True,
             condition_on_previous_text=False,
             initial_prompt=self.text_tail[-200:] or None,  # önceki metin: süreklilik ve yazım tutarlılığı
         )
-        segs = list(segments)
         if self._lang is None and info.language_probability > 0.8 and len(chunk) > 3 * SR:
             self._lang = info.language  # dil güvenle belli oldu: sonraki parçalarda tekrar algılama yapma
             self.info.emit("detected_lang", self._lang)
         pieces = []
-        for s in segs:
+        for s in segments:  # cümleler üretildikçe (liste beklenmez): ilerleme akıcı olsun
             text = s.text.strip()
             # sessizlikte uydurulan metni ele ("İzlediğiniz için teşekkürler" vb.)
             if not text or (s.no_speech_prob > 0.6 and s.avg_logprob < -1.0):
@@ -595,6 +595,8 @@ class LiveWorker(QThread):
                 continue
             pieces.append(join_piece(text, offset + s.start, last_end, self.timestamps))
             last_end = offset + s.end
+            if on_seg:  # ilerleme cümle cümle (durdurunca yuvarlak gösterge akıcı ilerlesin)
+                on_seg(offset + s.end)
             self.text_tail = (self.text_tail + " " + text)[-400:]
         return pieces, last_end
 

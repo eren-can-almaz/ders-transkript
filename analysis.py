@@ -334,7 +334,8 @@ class AnalysisWindow(QWidget):
         section("an_segment")
         self.start = row("an_start", QDoubleSpinBox(decimals=1, maximum=max(0.0, dur - 1), suffix=" s"))
         self.length = row("an_length", QDoubleSpinBox(decimals=1, minimum=1, maximum=300, value=min(30, dur), suffix=" s"))
-        if start is not None:  # dalgada seçilen aralıkla aç
+        if isinstance(start, (int, float)) and not isinstance(start, bool) \
+                and isinstance(end, (int, float)) and end > start:  # dalgada seçilen aralıkla aç
             self.start.setValue(start)
             self.length.setValue(min(300.0, max(1.0, end - start)))
 
@@ -891,5 +892,8 @@ class AnalysisWindow(QWidget):
         for v in (self.v_before, self.v_after, self.v_diff, self.v_clone):
             v.clear()
         shutil.rmtree(self.tmp, ignore_errors=True)
+        if self.vc_worker is None or not self.vc_worker.isRunning():
+            import voiceclone
+            voiceclone.release_model()
         release_memory()
         e.accept()

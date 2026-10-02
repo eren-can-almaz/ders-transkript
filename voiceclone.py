@@ -84,12 +84,16 @@ class Downloader(QThread):
             self.failed.emit(f"{type(e).__name__}: {e}")
 
 
-def _norm_text(text):
-    """Chatterbox'ın beklediği biçim: boşlukları sadeleştir, sonda noktalama olsun."""
+def _norm_text(text, lang="tr"):
+    """Chatterbox'ın eğitildiği biçim: küçük harf + Unicode NFKD (ör. 'ğ' → 'g' + birleşik işaret),
+    sade boşluklar, sonda noktalama. Türkçede I/İ küçük harfe dile uygun çevrilir (I→ı, İ→i)."""
+    import unicodedata
     t = " ".join(text.split())
     if t and t[-1] not in ".!?…,;:":
         t += "."
-    return t
+    if lang in ("tr", "az"):
+        t = t.replace("I", "ı").replace("İ", "i")
+    return unicodedata.normalize("NFKD", t.lower())
 
 
 def split_sentences(text, max_chars=220):
@@ -147,7 +151,7 @@ class VoiceClone:
 
     def _tokens(self, text, lang, exaggeration, max_new, cancel):
         cond_emb, _, _, _ = self._spk
-        ids = np.array([self.tok.encode(f"[{lang}]{_norm_text(text)}").ids], dtype=np.int64)
+        ids = np.array([self.tok.encode(f"[{lang}]{_norm_text(text, lang)}").ids], dtype=np.int64)
         pos = np.where(ids >= START, 0, np.arange(ids.shape[1])[np.newaxis, :] - 1)
         feed = {"input_ids": ids, "position_ids": pos.astype(np.int64),
                 "exaggeration": np.array([exaggeration], dtype=np.float32)}
@@ -202,6 +206,22 @@ class VoiceClone:
         return np.concatenate(pieces) if pieces else np.zeros(0, np.float32)
 
 
+_MODEL = {}  # yüklü model (yükleme ~1 dk): analiz penceresi açıkken tekrar kullanılır
+
+
+def get_model(threads):
+    m = _MODEL.get(threads)
+    if m is None:
+        _MODEL.clear()
+        m = _MODEL[threads] = VoiceClone(threads)
+    return m
+
+
+def release_model():
+    """Analiz penceresi kapanınca ~1,5–2 GB bellek geri verilsin."""
+    _MODEL.clear()
+
+
 class CloneWorker(QThread):
     """Arka planda: konuşmacıyı öğren → metni o sesle üret."""
     progress = pyqtSignal(float, str)
@@ -216,7 +236,7 @@ class CloneWorker(QThread):
     def run(self):
         try:
             self.progress.emit(0.0, "load")
-            vc = VoiceClone(self.threads)
+            vc = get_model(self.threads)
             ref = best_reference(self.ref, 16000)
             ref24 = np.interp(np.linspace(0, len(ref) - 1, int(len(ref) * SR / 16000)),
                               np.arange(len(ref)), ref).astype(np.float32)
