@@ -34,6 +34,7 @@ def set_button(btn, key, danger):
 class FilePanel(QWidget):
     """Bir ses dosyasını baştan sona metne çevirir; ilerlemeyi ayrıntılı gösterir."""
     tab_status = pyqtSignal(str)   # sekme etiketine eklenecek durum
+    title_changed = pyqtSignal()   # dosya seçildi: sekme adı dosya adı olur
 
     def __init__(self):
         super().__init__()
@@ -95,6 +96,13 @@ class FilePanel(QWidget):
         self.drop.show_file(path, *probe_audio(path))
         self.out.default_path = str(Path(path).with_suffix(".txt"))
         self.start_btn.setEnabled(self.worker is None)
+        self.title_changed.emit()
+
+    def tab_title(self):
+        if not self.audio_path:
+            return tr("tab_file")
+        name = Path(self.audio_path).stem
+        return name if len(name) <= 22 else name[:20] + "…"
 
     def start(self):
         if self.worker is not None:  # iptal düğmesi olarak çalışıyor
@@ -284,9 +292,6 @@ class Microphone:
         self.source.stop()
 
 
-REC_MODES = ["rm_both", "rm_record", "rm_text"]  # kaydet+yaz / yalnızca kaydet / yalnızca yaz
-
-
 class LivePanel(QWidget):
     """Ses kaydedici + canlı transkript. Tek düğmeyle kayıt; isteğe bağlı canlı metin."""
     tab_status = pyqtSignal(str)
@@ -367,14 +372,18 @@ class LivePanel(QWidget):
         grid.setColumnStretch(0, 1)
         r.addLayout(grid)
 
-        self.mode_title = QLabel(objectName="section")
-        self.rec_mode = Segmented(REC_MODES)
-        self.rec_mode.changed.connect(self._on_mode)
+        # ses her zaman kaydedilir; canlı metin tek bir anahtarla açılıp kapanır
+        live_row = QHBoxLayout()
+        live_row.setSpacing(10)
+        self.live_text = QCheckBox(objectName="switch")
+        self.live_text.setChecked(True)
+        self.live_text.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.live_text.toggled.connect(self._on_mode)
         self.mode_hint = QLabel(objectName="hint")
         self.mode_hint.setWordWrap(True)
-        r.addWidget(self.mode_title)
-        r.addWidget(self.rec_mode, alignment=Qt.AlignmentFlag.AlignLeft)
-        r.addWidget(self.mode_hint)
+        live_row.addWidget(self.live_text)
+        live_row.addWidget(self.mode_hint, 1)
+        r.addLayout(live_row)
 
         frow = QHBoxLayout()
         frow.setSpacing(6)
@@ -415,12 +424,8 @@ class LivePanel(QWidget):
         self.opts = SettingsBlock()
         t.addLayout(self.opts)
         self.ts = QCheckBox()
-        self.preview = QCheckBox()
-        self.preview.setChecked(True)
         t.addWidget(self.ts)
-        t.addWidget(self.preview)
-        for sig in (self.opts.quality.changed, self.opts.mode.changed, self.opts.lang.currentIndexChanged,
-                    self.preview.toggled):
+        for sig in (self.opts.quality.changed, self.opts.mode.changed, self.opts.lang.currentIndexChanged):
             sig.connect(self._update_summary)
         lay.addWidget(self.tr_card)
 
@@ -479,12 +484,11 @@ class LivePanel(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _mode(self):
-        i = self.rec_mode.index
-        return i in (0, 1), i in (0, 2)  # (kaydet, yazıya dök)
+        return True, self.live_text.isChecked()  # (kaydet, yazıya dök): ses her zaman kaydedilir
 
     def _on_mode(self, *_):
         _, transcribe = self._mode()
-        self.mode_hint.setText(tr(REC_MODES[self.rec_mode.index] + "_desc"))
+        self.mode_hint.setText(tr("live_text_on" if transcribe else "live_text_off"))
         self.tr_card.setVisible(transcribe)
         self.tr_card.setEnabled(self.worker is None)
         self.out.placeholder_key = "placeholder_live" if transcribe else "placeholder_record_only"
@@ -540,7 +544,7 @@ class LivePanel(QWidget):
         w = self.worker = LiveWorker(
             self.opts.model_name(), self.opts.language(), self.ts.isChecked(), self.opts.threads(),
             record_base=self.base if record else None, transcribe=transcribe,
-            preview=self.preview.isChecked(), draft_interval=1.5 if quiet else 1.0)
+            preview=True, draft_interval=1.5 if quiet else 1.0)
         w.ready.connect(lambda: self._set_state("recording") if self._state == "loading" else None)
         w.segment.connect(self.out.append)
         w.draft.connect(self.out.set_draft)
@@ -666,9 +670,9 @@ class LivePanel(QWidget):
         self._state = state
         _, transcribe = self._mode()
         key = {"idle": "st_ready", "loading": "st_loading",
-               "recording": "st_recording" if self._mode()[0] else "st_live",
+               "recording": "st_recording",
                "paused": "st_paused", "finishing": "st_finishing",
-               "done": "st_saved" if self._mode()[0] else "st_done"}[state]
+               "done": "st_done"}[state]
         self.state_lbl.setText(tr(key))
         self.state_lbl.setProperty("on", "true" if state in ("recording", "loading") else "false")
         repolish(self.state_lbl)
@@ -684,13 +688,11 @@ class LivePanel(QWidget):
     def _update_summary(self, *_):
         o = self.opts
         parts = [o.lang.currentText(), tr(QUALITY[o.quality.index][1]), tr(MODES[o.mode.index][0])]
-        if self.preview.isChecked():
-            parts.append(tr("preview_short"))
         self.tr_card.set_text(tr("sec_transcription"), "  ·  ".join(parts))
 
     def _set_running(self, running):
         self.rec_btn.setEnabled(running or bool(self._devices))
-        for w in [self.rec_mode, self.mic_combo, self.refresh_btn, self.folder_change]:
+        for w in [self.live_text, self.mic_combo, self.refresh_btn, self.folder_change]:
             w.setEnabled(not running)
         self.tr_card.setEnabled(not running)
         self.refresh_icons()
@@ -710,15 +712,13 @@ class LivePanel(QWidget):
         self.refresh_btn.setToolTip(tr("refresh_tip"))
         if not self._devices:
             self.mic_combo.setItemText(0, tr("no_mic"))
-        self.mode_title.setText(tr("sec_rec_mode"))
-        self.rec_mode.retranslate()
+        self.live_text.setText(tr("live_text"))
         self.folder_title.setText(tr("sec_folder"))
         self.folder_change.setText(tr("change_folder"))
         self.folder_open.setText(tr("open_folder"))
         self._show_folder()
         self.opts.retranslate()
         self.ts.setText(tr("timestamps"))
-        self.preview.setText(tr("preview"))
         self.lag_title.setText(tr("k_lag"))
         self.warn.setText(tr("lag_warn"))
         self._set_note(self._render_note)
@@ -730,19 +730,13 @@ class LivePanel(QWidget):
     def save_settings(self, st):
         self.opts.save(st, "live/")
         st.setValue("live/ts", self.ts.isChecked())
-        st.setValue("live/preview", self.preview.isChecked())
-        st.setValue("live/recmode", self.rec_mode.index)
+        st.setValue("live/text", self.live_text.isChecked())
         st.setValue("live/folder", str(self.folder))
 
     def load_settings(self, st):
         self.opts.load(st, "live/")
         self.ts.setChecked(st.value("live/ts", False, type=bool))
-        self.preview.setChecked(st.value("live/preview", True, type=bool))
-        try:
-            m = int(st.value("live/recmode", 0))
-        except (TypeError, ValueError):
-            m = 0
-        self.rec_mode.set_index(m if 0 <= m < len(REC_MODES) else 0)
+        self.live_text.setChecked(st.value("live/text", True, type=bool))
         folder = st.value("live/folder", "")
         if folder:
             self.folder = Path(folder)

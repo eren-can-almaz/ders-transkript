@@ -146,6 +146,34 @@ class SettingsBlock(QVBoxLayout):
         self.mode.set_index(get("mode", 0, len(MODES)))
 
 
+class TabChip(QFrame):
+    """Kapatılabilir sekme: etiket + ×. Tıklanınca etkinleşir."""
+    clicked = pyqtSignal()
+    close = pyqtSignal()
+
+    def __init__(self):
+        super().__init__(objectName="tab")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 6, 6, 6)
+        lay.setSpacing(6)
+        self.label = QLabel(objectName="tabLabel")
+        self.close_btn = QPushButton("×", objectName="tabClose")
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.clicked.connect(self.close)
+        lay.addWidget(self.label)
+        lay.addWidget(self.close_btn)
+
+    def mousePressEvent(self, e):
+        self.clicked.emit()
+
+    def set_active(self, on):
+        self.setProperty("active", "true" if on else "false")
+        self.label.setProperty("active", "true" if on else "false")
+        repolish(self)
+        repolish(self.label)
+
+
 class Collapsible(QFrame):
     """Başlığına tıklanınca açılıp kapanan kart; kapalıyken tek satırlık özet gösterir."""
 

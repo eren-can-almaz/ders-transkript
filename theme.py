@@ -93,6 +93,10 @@ QCheckBox {{ spacing: 8px; color: {muted}; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {border_strong}; border-radius: 4px; background: {card}; }}
 QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; image: url({CHECK_PNG}); }}
 
+QCheckBox#switch {{ spacing: 10px; color: {text}; font-weight: 600; }}
+QCheckBox#switch::indicator {{ width: 38px; height: 22px; border: none; background: transparent; image: url({SWITCH_OFF}); }}
+QCheckBox#switch::indicator:checked {{ image: url({SWITCH_ON}); }}
+
 QProgressBar {{ background: {track}; border: none; border-radius: 4px; }}
 QProgressBar::chunk {{ background: {accent}; border-radius: 4px; }}
 QLabel#step {{ font-size: 14px; font-weight: 600; }}
@@ -153,6 +157,34 @@ QPushButton#primarySmall {{ background: {accent}; color: {on_accent}; border: no
 QPushButton#primarySmall:hover {{ background: {accent_hover}; }}
 QPushButton#dangerSmall {{ background: transparent; color: {danger}; border: 1px solid {danger_border}; padding: 5px 12px; }}
 QPushButton#dangerSmall:hover {{ background: {danger_hover}; }}
+QFrame#tabbar {{ background: {seg_bg}; border: 1px solid {border}; border-radius: 10px; }}
+QFrame#tab {{ background: transparent; border: 1px solid transparent; border-radius: 7px; }}
+QFrame#tab:hover {{ background: {hover}; }}
+QFrame#tab[active="true"] {{ background: {card}; border-color: {border_strong}; }}
+QLabel#tabLabel {{ color: {muted}; font-weight: 600; }}
+QLabel#tabLabel[active="true"] {{ color: {accent}; }}
+QPushButton#tabClose {{
+    background: transparent; border: none; border-radius: 9px; color: {faint};
+    min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; padding: 0 0 2px 0; font-size: 15px;
+}}
+QPushButton#tabClose:hover {{ background: {danger_hover}; color: {danger}; }}
+QPushButton#addTab {{
+    background: transparent; border: 1px dashed {border_strong}; border-radius: 7px;
+    min-width: 32px; padding: 4px 8px; font-size: 16px; color: {muted};
+}}
+QPushButton#addTab:hover {{ border-color: {accent}; color: {accent}; background: {accent_soft}; }}
+QPushButton#addTab::menu-indicator {{ image: none; width: 0; }}
+QMenu {{ background: {card}; border: 1px solid {border}; padding: 4px; }}
+QMenu::item {{ padding: 7px 18px; border-radius: 6px; color: {text}; }}
+QMenu::item:selected {{ background: {accent_soft}; color: {accent}; }}
+QMenu::item:disabled {{ color: {disabled_text}; }}
+QLabel#plus {{
+    color: {accent}; background: {accent_soft}; border-radius: 36px; font-size: 40px; font-weight: 300;
+    min-width: 72px; max-width: 72px; min-height: 72px; max-height: 72px;
+}}
+QLabel#emptyTitle {{ font-size: 17px; font-weight: 700; }}
+QPushButton#choice {{ padding: 12px 18px; text-align: left; font-size: 14px; }}
+QPushButton#choice:hover {{ border-color: {accent}; color: {accent}; background: {accent_soft}; }}
 QPushButton#link {{ background: transparent; border: none; color: {accent}; padding: 2px 4px; font-weight: 600; }}
 QPushButton#link:hover {{ text-decoration: underline; background: transparent; }}
 """
@@ -180,9 +212,27 @@ def _make_assets(theme):
         pm.save(str(path))
         return path.as_posix()
 
+    def switch(name, track, knob_right):
+        from PyQt6.QtCore import QRectF
+        pm = QPixmap(76, 44)  # 2x çözünürlük: 38x22 gösterilir
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(track))
+        p.drawRoundedRect(QRectF(0, 0, 76, 44), 22, 22)
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(QRectF(36 if knob_right else 4, 4, 36, 36))
+        p.end()
+        path = d / f"{name}_{theme}.png"
+        pm.save(str(path))
+        return path.as_posix()
+
     return {
         "ARROW_PNG": draw("arrow", c["muted"], [(4, 7), (10, 13), (16, 7)], 2.4),
         "CHECK_PNG": draw("check", c["on_accent"], [(4.5, 10.5), (8.5, 14.5), (15.5, 6)], 2.6),
+        "SWITCH_OFF": switch("switch_off", c["border_strong"], False),
+        "SWITCH_ON": switch("switch_on", c["accent"], True),
     }
 
 
