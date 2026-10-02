@@ -129,6 +129,54 @@ def decode_audio(path: str, sr: int = SR):
     return out
 
 
+def decode_range(path: str, start: float, length: float, sr: int = SR):
+    """Dosyanın yalnızca [start, start+length) aralığını çözer (dosyada o noktaya atlar).
+
+    Uzun kayıtların küçük bir bölümünü incelerken tüm dosyayı belleğe almamak için.
+    """
+    import av
+
+    chunks, got, need = [], 0, int(length * sr)
+    resampler = av.AudioResampler(format="s16", layout="mono", rate=sr)
+    with av.open(path) as container:
+        stream = container.streams.audio[0]
+        if start > 0:
+            container.seek(int(max(0.0, start - 1.0) / stream.time_base), stream=stream)  # 1 sn önceki anahtar kareye
+        skip = None
+        for frame in container.decode(stream):
+            for f in resampler.resample(frame):
+                a = f.to_ndarray().reshape(-1)
+                if skip is None:  # ilk karenin zamanına göre başlangıca kadar atlanacak örnek sayısı
+                    t0 = float(frame.pts * stream.time_base) if frame.pts is not None else 0.0
+                    skip = max(0, int(round((start - t0) * sr)))
+                if skip:
+                    cut = min(skip, len(a))
+                    a, skip = a[cut:], skip - cut
+                if len(a):
+                    chunks.append(a[: need - got])
+                    got += len(chunks[-1])
+            if got >= need:
+                break
+    out = np.empty(got, np.float32)
+    pos = 0
+    for c in chunks:
+        out[pos:pos + len(c)] = c
+        pos += len(c)
+    out *= 1.0 / 32768.0
+    return out
+
+
+def release_memory():
+    """Büyük diziler bırakıldıktan sonra boşalan belleği işletim sistemine geri ver (Linux/glibc)."""
+    import gc
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 def probe_audio(path):
     """(süre sn veya None, boyut bayt) — dosya seçilince bilgi göstermek için."""
     size = os.path.getsize(path)
