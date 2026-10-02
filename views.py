@@ -50,6 +50,7 @@ class ItemView(QWidget):
         self._t_start = self._t_upd = self._eta = None
         self._step = -1
         self._note = ""
+        self.other_recording = lambda: False  # ana pencere bağlar
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(44, 32, 44, 28)
@@ -357,6 +358,9 @@ class ItemView(QWidget):
     def start(self):
         if not self._devices or self.rec_state != "new":
             return
+        if self.other_recording():  # tek mikrofon: aynı anda tek kayıt
+            QMessageBox.information(self, tr("new_recording"), tr("rec_busy"))
+            return
         device = self._devices[self.mic_combo.currentIndex()]
         live = self.live_text.isChecked()
         base = unsaved_dir() / self.item.id
@@ -601,6 +605,10 @@ class ItemView(QWidget):
     def delete(self):
         it = self.item
         unsaved = it.kind == "rec" and not it.saved
+        if it.new:  # hiç başlatılmamış boş kayıt: sormadan kaldır
+            self.lib.remove(it, delete_files=False)
+            self.closed.emit(it)
+            return
         if unsaved and QMessageBox.question(
                 self, tr("delete"), tr("delete_q"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

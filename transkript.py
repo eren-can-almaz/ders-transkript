@@ -63,8 +63,8 @@ class EmptyState(QWidget):
         self.hint.setText(tr("empty_hint"))
         self.btn_rec.setText("   " + tr("new_recording"))
         self.btn_file.setText("   " + tr("add_file"))
-        self.btn_rec.setIcon(glyph("record", c["red"]))
-        self.btn_file.setIcon(glyph("doc", c["accent"]))
+        self.btn_rec.setIcon(glyph("mic", c["red"]))
+        self.btn_file.setIcon(glyph("wave", c["accent"]))
 
 
 class SettingsDialog(QDialog):
@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
     def _view(self, it):
         if it.id not in self.views:
             v = ItemView(it, self.lib, self.settings, lambda: self.folder)
+            v.other_recording = lambda v=v: any(o.recording() for _, o in self.views.values() if o is not v)
             v.row_status.connect(lambda text, kind, it=it: self.rows[it.id].set_status(text, kind))
             v.row_refresh.connect(lambda it=it: self.rows[it.id].refresh())
             v.closed.connect(self._on_closed)
@@ -263,12 +264,7 @@ class MainWindow(QMainWindow):
         return next((v for _, v in self.views.values() if v.recording()), None)
 
     def new_recording(self):
-        busy = self._recording_view()
-        if busy:  # tek mikrofon: süren kayda git
-            return self.select(busy.item)
-        pending = next((i for i in self.lib.items if i.new), None)
-        if pending:
-            return self.select(pending)
+        """Her zaman listeye yeni bir kayıt ekler (başlatılmamış olanlar kapanışta kendiliğinden düşer)."""
         it = Item("rec", self.lib.next_rec_title())
         it.new = True
         self.lib.items.insert(0, it)
@@ -306,6 +302,8 @@ class MainWindow(QMainWindow):
             self.select(last)
 
     def _on_closed(self, it):
+        if it.new and it.title == tr("rec_title", n=self.lib.rec_counter):
+            self.lib.rec_counter -= 1  # başlatılmadan silinen son kaydın numarası boşa gitmesin
         row = self.rows.pop(it.id, None)
         if row:
             row.setParent(None)
@@ -322,8 +320,8 @@ class MainWindow(QMainWindow):
     def _add_menu(self):
         menu = QMenu(self)
         c = colors()
-        a_rec = menu.addAction(glyph("record", c["red"]), tr("new_recording"))
-        a_file = menu.addAction(glyph("doc", c["accent"]), tr("add_file"))
+        a_rec = menu.addAction(glyph("mic", c["red"]), tr("new_recording"))
+        a_file = menu.addAction(glyph("wave", c["accent"]), tr("add_file"))
         chosen = menu.exec(self.add_btn.mapToGlobal(self.add_btn.rect().bottomLeft()))
         if chosen is a_rec:
             self.new_recording()
@@ -360,6 +358,8 @@ class MainWindow(QMainWindow):
         self.gear.setIcon(glyph("gear", colors()["muted"]))
         for _, v in self.views.values():
             v.refresh_icons()
+        for row in self.rows.values():
+            row.refresh()
         self.update()
 
     def set_ui_lang(self, code):

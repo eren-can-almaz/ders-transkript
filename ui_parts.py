@@ -436,8 +436,11 @@ class ItemRow(QFrame):
         self.item = item
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 9, 12, 9)
-        lay.setSpacing(8)
+        lay.setContentsMargins(10, 9, 12, 9)
+        lay.setSpacing(10)
+        self.icon = QLabel()
+        self.icon.setFixedSize(22, 22)
+        lay.addWidget(self.icon, alignment=Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
         texts.setSpacing(2)
         self.title = QLabel(objectName="rowTitle")
@@ -464,8 +467,12 @@ class ItemRow(QFrame):
 
     def refresh(self):
         it = self.item
+        c = colors()
+        recording = getattr(self, "_status_kind", "") == "rec" and bool(self.status)
+        color = c["red"] if recording or (it.kind == "rec" and it.new) else c["muted"]
+        self.icon.setPixmap(glyph("mic" if it.kind == "rec" else "wave", color, 44).pixmap(22, 22))
         fm = self.title.fontMetrics()
-        self.title.setText(fm.elidedText(it.title, Qt.TextElideMode.ElideRight, 190))
+        self.title.setText(fm.elidedText(it.title, Qt.TextElideMode.ElideRight, 170))
         meta = fmt_date(it.created)
         if it.duration:
             meta += f"  ·  {fmt_time(it.duration)}"

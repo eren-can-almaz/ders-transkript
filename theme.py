@@ -248,7 +248,7 @@ def app_icon():
 
 
 def glyph(kind, color, size=48):
-    """Basit simgeler: record, stop, pause, play, plus, mic, doc, gear."""
+    """Basit simgeler: record, stop, pause, play, mic (kayıt), wave (ses dosyası), doc, gear."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -271,14 +271,21 @@ def glyph(kind, color, size=48):
         path.lineTo(17 * u, 36 * u)
         path.closeSubpath()
         p.drawPath(path)
-    elif kind in ("mic", "doc", "gear"):
+    elif kind == "mic":  # dolu kapsül + ayak (SF Symbols "mic.fill" benzeri)
+        p.drawRoundedRect(QRectF(17 * u, 5 * u, 14 * u, 24 * u), 7 * u, 7 * u)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 3 * u, cap=Qt.PenCapStyle.RoundCap))
+        p.drawArc(QRectF(11 * u, 12 * u, 26 * u, 24 * u), 200 * 16, 140 * 16)
+        p.drawLine(QPointF(24 * u, 36 * u), QPointF(24 * u, 42 * u))
+        p.drawLine(QPointF(18 * u, 42.5 * u), QPointF(30 * u, 42.5 * u))
+    elif kind == "wave":  # ses dosyası: dalga çubukları
+        for i, h in enumerate([10, 20, 30, 18, 24, 12]):
+            x = 8 * u + i * 5.6 * u
+            p.drawRoundedRect(QRectF(x, 24 * u - h * u / 2, 3.4 * u, h * u), 1.7 * u, 1.7 * u)
+    elif kind in ("doc", "gear"):
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(col, 3 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
-        if kind == "mic":
-            p.drawRoundedRect(QRectF(18 * u, 8 * u, 12 * u, 20 * u), 6 * u, 6 * u)
-            p.drawArc(QRectF(12 * u, 14 * u, 24 * u, 20 * u), 200 * 16, 140 * 16)
-            p.drawLine(QPointF(24 * u, 34 * u), QPointF(24 * u, 40 * u))
-        elif kind == "doc":
+        if kind == "doc":
             p.drawRoundedRect(QRectF(12 * u, 7 * u, 24 * u, 34 * u), 4 * u, 4 * u)
             for y in (17, 24, 31):
                 p.drawLine(QPointF(18 * u, y * u), QPointF(30 * u, y * u))
