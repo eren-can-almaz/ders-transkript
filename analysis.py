@@ -8,8 +8,8 @@ import wave
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPolygonF
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 import dsp
 from core import SR, decode_audio, fmt_time, user_data_dir
 from i18n import tr
-from theme import colors
+from theme import colors, glyph
 
 ROWS, COLS = 360, 1400  # spektrogram görüntü çözünürlüğü
 
@@ -34,16 +34,24 @@ def write_wav(path, y, sr=SR):
 
 
 class SpectrogramView(QWidget):
-    """Eksenli spektrogram: zaman (s) × frekans (Hz), renk çubuğu, fare ile okuma."""
+    """Eksenli spektrogram: zaman (s) × frekans (Hz), renk çubuğu, fare ile okuma,
+    oynatma imleci; tıklanınca o andan çalmak için `clicked(saniye)`."""
     L, R, T, B = 62, 64, 24, 30
+    clicked = pyqtSignal(float)
 
     def __init__(self):
         super().__init__()
         self.setMinimumHeight(190)
         self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.img = None
         self.title = ""
         self.hover = None
+        self.playhead = None  # sn (eksen zamanı) ya da None
+
+    def set_playhead(self, t):
+        self.playhead = t
+        self.update()
 
     def set_data(self, rgb, db, t0, t1, freqs, title, vmin, vmax, lut, unit="dB"):
         h, w, _ = rgb.shape
@@ -127,6 +135,14 @@ class SpectrogramView(QWidget):
         for v, yy in ((self.vmax, cb.top()), ((self.vmax + self.vmin) / 2, cb.center().y()), (self.vmin, cb.bottom())):
             p.drawText(QRectF(cb.right() + 3, yy - 8, 40, 16), Qt.AlignmentFlag.AlignVCenter, f"{v:.0f}")
         p.drawText(QRectF(cb.left() - 6, 2, 60, self.T - 6), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, self.unit)
+        # oynatma imleci
+        if self.playhead is not None and self.t0 <= self.playhead <= self.t1:
+            x = r.left() + (self.playhead - self.t0) / span * r.width()
+            p.setPen(QPen(QColor(c["red"]), 2))
+            p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(c["red"]))
+            p.drawPolygon(QPolygonF([QPointF(x - 5, r.top() - 6), QPointF(x + 5, r.top() - 6), QPointF(x, r.top())]))
         # fare ile okuma
         if self.hover:
             x, y, text = self.hover
@@ -156,6 +172,11 @@ class SpectrogramView(QWidget):
     def leaveEvent(self, e):
         self.hover = None
         self.update()
+
+    def mousePressEvent(self, e):
+        r = self._plot()
+        if self.img is not None and r.contains(e.position()):
+            self.clicked.emit(self.t0 + (e.position().x() - r.left()) / r.width() * (self.t1 - self.t0))
 
 
 class ComputeWorker(QThread):
@@ -364,21 +385,42 @@ class AnalysisWindow(QWidget):
         rl.addWidget(self.info)
         split = QSplitter(Qt.Orientation.Vertical)
         self.v_before, self.v_after, self.v_diff = SpectrogramView(), SpectrogramView(), SpectrogramView()
-        for v in (self.v_before, self.v_after, self.v_diff):
-            split.addWidget(v)
+        self.play_btns, self.play_times = {}, {}
+        for v, which in ((self.v_before, "orig"), (self.v_after, "proc"), (self.v_diff, None)):
+            panel = QWidget()
+            pl = QHBoxLayout(panel)
+            pl.setContentsMargins(0, 0, 0, 0)
+            pl.setSpacing(6)
+            col_w = QWidget()
+            col_w.setFixedWidth(56)  # üç panel hizalı kalsın
+            col = QVBoxLayout(col_w)
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(4)
+            col.addSpacing(SpectrogramView.T)
+            if which:  # her spektrogramın yanında kendi oynat / duraklat düğmesi
+                b = QPushButton(objectName="play")
+                b.setIconSize(QSize(20, 20))
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.clicked.connect(lambda _=False, w=which: self._play(w))
+                tl = QLabel("00:00", objectName="faint")
+                tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                col.addWidget(b, alignment=Qt.AlignmentFlag.AlignHCenter)
+                col.addWidget(tl)
+                self.play_btns[which], self.play_times[which] = b, tl
+                v.clicked.connect(lambda t, w=which: self._play_at(w, t))
+            else:
+                v.clicked.connect(lambda t: self._play_at("orig", t))
+            col.addStretch()
+            pl.addWidget(col_w)
+            pl.addWidget(v, 1)
+            split.addWidget(panel)
         rl.addWidget(split, 1)
         play = QHBoxLayout()
         play.setSpacing(8)
-        self.play_orig = QPushButton(objectName="tinted")
-        self.play_proc = QPushButton(objectName="tinted")
         self.export_btn = QPushButton(tr("an_export"))
         self.add_btn = QPushButton(tr("an_to_list"), objectName="primary")
-        self.play_orig.clicked.connect(lambda: self._play("orig"))
-        self.play_proc.clicked.connect(lambda: self._play("proc"))
         self.export_btn.clicked.connect(lambda: self.export(to_list=False))
         self.add_btn.clicked.connect(lambda: self.export(to_list=True))
-        for b in (self.play_orig, self.play_proc):
-            play.addWidget(b)
         play.addStretch()
         play.addWidget(self.export_btn)
         play.addWidget(self.add_btn)
@@ -390,6 +432,10 @@ class AnalysisWindow(QWidget):
         self.player.setAudioOutput(self.out)
         self.player.playbackStateChanged.connect(lambda *_: self._render_play())
         self._playing = None
+        self._pending_seek = None
+        self.player.mediaStatusChanged.connect(self._on_media_status)
+        self.head_timer = QTimer(self)  # imleç akıcı ilerlesin (~30 kare/sn)
+        self.head_timer.timeout.connect(self._update_heads)
         self._on_transform()
         self._render_play()
         self._set_enabled_outputs(False)
@@ -488,7 +534,7 @@ class AnalysisWindow(QWidget):
             self.v_diff.setVisible(out["after"] is None)
         parts = [tr("an_ms", ms=out["ms"]),
                  f"{fmt_time(out['t0'])}–{fmt_time(out['t1'])}"]
-        if "nr_db" in out:
+        if out.get("nr_db", 0) >= 0.5:  # temiz kayıtta ölçülebilir bir azalma yoksa gösterme
             parts.append(tr("an_nr", db=f"{out['nr_db']:.1f}"))
         if out["removed"]:
             parts.append(tr("an_removed", s=f"{out['removed']:.1f}"))
@@ -496,13 +542,18 @@ class AnalysisWindow(QWidget):
         # dinlemek için geçici dosyalar (yeniden sentezlenmiş ses dahil)
         self.player.stop()
         self.player.setSource(QUrl())
+        self._playing = None
+        for v in (self.v_before, self.v_after, self.v_diff):
+            v.set_playhead(None)
+        for tl in self.play_times.values():
+            tl.setText("00:00")
         write_wav(self.tmp / "orig.wav", out["seg"])
         if out["after"] is not None:
             write_wav(self.tmp / "proc.wav", out["after"])
         self._set_enabled_outputs(out["after"] is not None)
 
     def _set_enabled_outputs(self, has_proc):
-        self.play_proc.setEnabled(has_proc)
+        self.play_btns["proc"].setEnabled(has_proc)
         self.export_btn.setEnabled(has_proc)
         self.add_btn.setEnabled(has_proc)
 
@@ -512,14 +563,55 @@ class AnalysisWindow(QWidget):
             self.player.pause()
             return
         if self._playing != which:
-            self.player.setSource(QUrl.fromLocalFile(str(self.tmp / f"{which}.wav")))
-            self._playing = which
+            self._load(which)
         self.player.play()
+
+    def _load(self, which):
+        self.player.stop()
+        self.player.setSource(QUrl.fromLocalFile(str(self.tmp / f"{which}.wav")))
+        self._playing = which
+
+    def _play_at(self, which, t):
+        """Spektrograma tıklanınca: o andan çal."""
+        if self.result is None or (which == "proc" and self.result.get("after") is None):
+            return
+        pos = int(max(0.0, t - self.result["t0"]) * 1000)
+        if self._playing != which:
+            self._load(which)
+            self._pending_seek = pos  # kaynak yüklenince konumlan
+        else:
+            self.player.setPosition(pos)
+        self.player.play()
+
+    def _on_media_status(self, status):
+        if self._pending_seek is not None and status in (QMediaPlayer.MediaStatus.LoadedMedia,
+                                                          QMediaPlayer.MediaStatus.BufferedMedia):
+            self.player.setPosition(self._pending_seek)
+            self._pending_seek = None
+
+    def _update_heads(self):
+        if self.result is None:
+            return
+        t = self.result["t0"] + self.player.position() / 1000
+        orig = self._playing == "orig"
+        self.v_before.set_playhead(t if orig else None)
+        self.v_diff.set_playhead(t if orig else None)
+        self.v_after.set_playhead(None if orig else t)
+        if self._playing in self.play_times:
+            self.play_times[self._playing].setText(fmt_time(self.player.position() / 1000))
 
     def _render_play(self):
         playing = self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-        for b, which, key in ((self.play_orig, "orig", "an_play_orig"), (self.play_proc, "proc", "an_play_proc")):
-            b.setText(("❚❚  " if playing and self._playing == which else "▶  ") + tr(key))
+        c = colors()
+        for which, b in self.play_btns.items():
+            active = playing and self._playing == which
+            b.setIcon(glyph("pause" if active else "play", "#ffffff"))
+            b.setToolTip(tr("pause_tip" if active else "an_play_" + which))
+        if playing:
+            self.head_timer.start(33)
+        else:
+            self.head_timer.stop()
+            self._update_heads()
 
     def export(self, to_list):
         if self.exporter is not None:

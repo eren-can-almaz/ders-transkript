@@ -196,10 +196,11 @@ def process(x, sr, denoise=0.0, boost_db=0.0, trim=None, n_fft=1024, hop=256, wi
                 S = boost_spec(S, sr, n_fft, boost_db)
             out = istft(S, n_fft, hop, win, length=len(seg))
             ramp = np.ones(len(seg), np.float32)  # blok kenarlarında doğrusal çapraz geçiş
+            k = min(2 * ov, len(seg))  # son blok geçişten kısa olabilir (ör. kaydın sonundaki artık)
             if a > 0:
-                ramp[: 2 * ov] = np.linspace(0, 1, 2 * ov)
+                ramp[:k] = np.linspace(0, 1, k)
             if b < len(x):
-                ramp[-2 * ov:] = np.minimum(ramp[-2 * ov:], np.linspace(1, 0, 2 * ov))
+                ramp[-k:] = np.minimum(ramp[-k:], np.linspace(1, 0, k))
             y[a:b] += out * ramp
             weight[a:b] += ramp
             if progress:
