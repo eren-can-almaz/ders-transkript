@@ -5,18 +5,21 @@ Ders kayıtlarını ve mikrofon kayıtlarını **internetsiz** metne çeviren ma
 
 ## İndirme
 
-[**Releases**](../../releases/latest) sayfasından bilgisayarınıza uygun dosyayı indirin.
-Modeller dosyanın içindedir: Python, model veya başka bir şey kurmanız gerekmez.
+Bilgisayarınıza uygun bağlantıya tıklayın; indirme hemen başlar (~1,5 GB). Modeller dosyanın içindedir:
+Python, model veya başka bir şey kurmanız gerekmez.
 
-| Bilgisayar | Dosya | Çalıştırma |
+| Bilgisayar | İndir | Kurulum |
 |---|---|---|
-| Windows 10/11 | `DersTranskript-windows.zip` | Zip'e sağ tık → **Tümünü ayıkla** → klasördeki `DersTranskript.exe` |
-| Mac (M1/M2/M3/M4), macOS 14+ | `DersTranskript-mac-apple-silicon.dmg` | DMG'yi açın, uygulamayı **Uygulamalar**'a sürükleyin |
-| Mac (Intel), macOS 13+ | `DersTranskript-mac-intel.dmg` | aynı |
-| Linux (Ubuntu 22.04+, Debian 12+, Fedora 36+) | `DersTranskript-linux.tar.gz` | Açın, klasörde `./kur.sh` çalıştırın → menüde **Ders Transkript** |
+| **Windows** 10/11 | [⬇ DersTranskript-windows.zip](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-windows.zip) | Zip'e sağ tık → **Tümünü ayıkla** → klasördeki `DersTranskript.exe` |
+| **Mac** (Apple M1/M2/M3/M4), macOS 14+ | [⬇ DersTranskript-mac-apple-silicon.dmg](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-mac-apple-silicon.dmg) | DMG'yi açın, uygulamayı **Uygulamalar** klasörüne sürükleyin |
+| **Mac** (Intel), macOS 13+ | [⬇ DersTranskript-mac-intel.dmg](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-mac-intel.dmg) | aynı |
+| **Linux** (Ubuntu 22.04+, Debian 12+, Fedora 36+) | [⬇ DersTranskript-linux.tar.gz](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-linux.tar.gz) | Açın, klasörde `./kur.sh` → menüde **Ders Transkript** |
 
-Mac'inizin hangi işlemciye sahip olduğunu  menüsü → **Bu Mac Hakkında** → "Çip" (Apple M…) ya da
-"İşlemci" (Intel) satırından görebilirsiniz.
+Tüm sürümler ve değişiklikler: [Releases](https://github.com/writerforight/ders-transkript/releases).
+Yeşil **Code → Download ZIP** düğmesi yalnızca kaynak kodu indirir, uygulama değildir.
+
+**Mac'im hangisi?**  menüsü → **Bu Mac Hakkında**: "Çip: Apple M…" yazıyorsa **Apple M** dosyası,
+"İşlemci: … Intel …" yazıyorsa **Intel** dosyası. (2021 ve sonrası Mac'lerin neredeyse hepsi Apple M'dir.)
 
 ### İlk açılıştaki güvenlik uyarısı
 
