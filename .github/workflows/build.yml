@@ -22,6 +22,7 @@ jobs:
           - { os: macos-15-intel, asset: DersTranskript-mac-intel.dmg }
           - { os: ubuntu-22.04,   asset: DersTranskript-linux.tar.gz }  # glibc 2.35: Ubuntu 22.04+, Debian 12+, Fedora 36+
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60  # bir şey takılırsa 6 saat beklemesin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,6 +59,7 @@ jobs:
 
       - name: Windows - paketi test et
         if: runner.os == 'Windows'
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $p = Start-Process dist\DersTranskript\DersTranskript.exe -ArgumentList "--selftest" -Wait -PassThru
@@ -66,10 +68,16 @@ jobs:
           if (-not (Select-String -Path selftest.log -Pattern "SELFTEST OK")) { exit 1 }
       - name: macOS - paketi test et
         if: runner.os == 'macOS'
-        run: dist/DersTranskript.app/Contents/MacOS/DersTranskript --selftest | tee /dev/stderr | grep -q "SELFTEST OK"
+        timeout-minutes: 10
+        run: |
+          dist/DersTranskript.app/Contents/MacOS/DersTranskript --selftest > selftest.log 2>&1 || { cat selftest.log; exit 1; }
+          cat selftest.log && grep -q "SELFTEST OK" selftest.log
       - name: Linux - paketi test et
         if: runner.os == 'Linux'
-        run: QT_QPA_PLATFORM=offscreen dist/DersTranskript/DersTranskript --selftest | tee /dev/stderr | grep -q "SELFTEST OK"
+        timeout-minutes: 10
+        run: |
+          QT_QPA_PLATFORM=offscreen dist/DersTranskript/DersTranskript --selftest > selftest.log 2>&1 || { cat selftest.log; exit 1; }
+          cat selftest.log && grep -q "SELFTEST OK" selftest.log
 
       - name: Windows - zip
         if: runner.os == 'Windows'

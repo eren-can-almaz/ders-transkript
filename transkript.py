@@ -659,7 +659,7 @@ def main():
             sys.stdout = sys.stderr = open("selftest.log", "w", encoding="utf-8")
         i = sys.argv.index("--selftest")
         selftest(sys.argv[i + 1] if len(sys.argv) > i + 1 else None)
-        return
+        _hard_exit(0)
     lower_priority()
     install_error_handler()
     app = QApplication(sys.argv)
@@ -674,7 +674,21 @@ def main():
     w = MainWindow()
     w._apply_theme()
     w.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    w.settings.sync()  # kapanıştan önce diske yazılması gereken tek şey (temizlik closeEvent'te yapıldı)
+    _hard_exit(code)
+
+
+def _hard_exit(code):
+    """Süreci doğrudan sonlandır. macOS'ta Python'un normal kapanışı, ses (CoreAudio) iş parçacıkları
+    yüzünden bitmeyebiliyor: uygulama Dock'ta "yanıt vermiyor" olarak asılı kalır (derleme sunucusunda
+    selftest "SELFTEST OK" yazıp hiç çıkmadı). Tüm temizlik bundan önce yapılmış olmalı."""
+    for f in (sys.stdout, sys.stderr):
+        try:
+            f and f.flush()
+        except (OSError, ValueError):
+            pass
+    os._exit(code)
 
 
 if __name__ == "__main__":
