@@ -598,8 +598,6 @@ def install_error_handler():
 
 
 def main():
-    import multiprocessing
-    multiprocessing.freeze_support()  # paketlenmiş uygulamada ses klonlama süreci için gerekli
     if "--selftest" in sys.argv:
         if sys.stdout is None:  # pencereli exe'de konsol yok: çıktıyı dosyaya yaz
             sys.stdout = sys.stderr = open("selftest.log", "w", encoding="utf-8")

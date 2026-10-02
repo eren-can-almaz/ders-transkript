@@ -385,7 +385,6 @@ class AnalysisWindow(QWidget):
         self.compute_btn = QPushButton(tr("an_compute"), objectName="primary")
         self.compute_btn.clicked.connect(self.compute)
         f.addWidget(self.compute_btn)
-        self._build_clone_section(f, section)
         f.addStretch()
         root.addWidget(side)
 
@@ -402,10 +401,8 @@ class AnalysisWindow(QWidget):
         rl.addWidget(self.info)
         split = QSplitter(Qt.Orientation.Vertical)
         self.v_before, self.v_after, self.v_diff = SpectrogramView(), SpectrogramView(), SpectrogramView()
-        self.v_clone = SpectrogramView()
         self.play_btns, self.play_times = {}, {}
-        for v, which in ((self.v_before, "orig"), (self.v_after, "proc"), (self.v_diff, None),
-                         (self.v_clone, "clone")):
+        for v, which in ((self.v_before, "orig"), (self.v_after, "proc"), (self.v_diff, None)):
             panel = QWidget()
             pl = QHBoxLayout(panel)
             pl.setContentsMargins(0, 0, 0, 0)
@@ -433,9 +430,6 @@ class AnalysisWindow(QWidget):
             pl.addWidget(col_w)
             pl.addWidget(v, 1)
             split.addWidget(panel)
-            if which == "clone":
-                self.clone_panel = panel
-                panel.hide()
         rl.addWidget(split, 1)
         play = QHBoxLayout()
         play.setSpacing(8)
@@ -446,13 +440,6 @@ class AnalysisWindow(QWidget):
         self.exp_ring = RingProgress(36, 3)
         self.exp_ring.hide()
         play.addWidget(self.exp_ring)
-        self.vc_save_btn = QPushButton(tr("vc_save"))
-        self.vc_add_btn = QPushButton(tr("vc_to_list"), objectName="tinted")
-        self.vc_save_btn.clicked.connect(lambda: self.export_clone(to_list=False))
-        self.vc_add_btn.clicked.connect(lambda: self.export_clone(to_list=True))
-        for b in (self.vc_save_btn, self.vc_add_btn):
-            b.hide()
-            play.addWidget(b)
         play.addStretch()
         play.addWidget(self.export_btn)
         play.addWidget(self.add_btn)
@@ -612,10 +599,7 @@ class AnalysisWindow(QWidget):
 
     def _play_at(self, which, t):
         """Spektrograma tıklanınca: o andan çal."""
-        if which == "clone":
-            if self.clone is None:
-                return
-        elif self.result is None or (which == "proc" and self.result.get("after") is None):
+        if self.result is None or (which == "proc" and self.result.get("after") is None):
             return
         pos = int(max(0.0, t - self._offset(which)) * 1000)
         if self._playing != which:
@@ -632,8 +616,8 @@ class AnalysisWindow(QWidget):
             self._pending_seek = None
 
     def _offset(self, which):
-        """Panelin zaman ekseninin başlangıcı (klon 0'dan, diğerleri bölüm başından)."""
-        return 0.0 if which == "clone" else (self.result["t0"] if self.result else 0.0)
+        """Panelin zaman ekseninin başlangıcı (bölüm başı)."""
+        return self.result["t0"] if self.result else 0.0
 
     def _update_heads(self):
         w = self._playing
@@ -641,7 +625,6 @@ class AnalysisWindow(QWidget):
         self.v_before.set_playhead(t if w == "orig" else None)
         self.v_diff.set_playhead(t if w == "orig" else None)
         self.v_after.set_playhead(t if w == "proc" else None)
-        self.v_clone.set_playhead(t if w == "clone" else None)
         if self._playing in self.play_times:
             self.play_times[self._playing].setText(fmt_time(self.player.position() / 1000))
 
@@ -686,257 +669,12 @@ class AnalysisWindow(QWidget):
         self.info.setText(tr("an_exporting", p=0))
         self.exporter.start()
 
-    # ================================================================ ses klonlama (eklenti)
-    def _build_clone_section(self, f, section):
-        import voiceclone
-        self.clone = None
-        self.vc_worker = self.vc_tr_worker = self.vc_dl = None
-        section("vc_title")
-        desc = QLabel(tr("vc_desc"), objectName="faint")
-        desc.setWordWrap(True)
-        f.addWidget(desc)
-        consent = QLabel("⚠  " + tr("vc_consent"), objectName="warn")
-        consent.setWordWrap(True)
-        f.addWidget(consent)
-        # kurulu değilse: indir
-        self.vc_install = QPushButton(tr("vc_install"), objectName="tinted")
-        self.vc_install.clicked.connect(self._download_plugin)
-        f.addWidget(self.vc_install)
-        # kuruluysa: metin, dil, üret
-        self.vc_box = QWidget()
-        vb = QVBoxLayout(self.vc_box)
-        vb.setContentsMargins(0, 0, 0, 0)
-        vb.setSpacing(8)
-        from PyQt6.QtWidgets import QPlainTextEdit
-
-        class _Text(QPlainTextEdit):  # odaklanınca modeli arka planda yüklemeye başla
-            def focusInEvent(inner, e):
-                super().focusInEvent(e)
-                self._prewarm()
-        self.vc_text = _Text()
-        self.vc_text.setPlaceholderText(tr("vc_text_ph"))
-        self.vc_text.setFixedHeight(110)
-        self._vc_prog_set = False   # metin programla mı değişti
-        self._vc_user_edited = False
-        self.vc_text.textChanged.connect(
-            lambda: None if self._vc_prog_set else setattr(self, "_vc_user_edited", True))
-        self.vc_text.setStyleSheet("QPlainTextEdit { background: palette(alternate-base); border-radius: 8px; padding: 6px; }")
-        vb.addWidget(self.vc_text)
-        row = QHBoxLayout()
-        self.vc_get = QPushButton(tr("vc_get_text"), objectName="plain")
-        self.vc_get.clicked.connect(lambda: self._fill_from_segment(force=True))
-        self.vc_lang = QComboBox()
-        for code in ("tr", "en", "de", "fr", "es", "it", "pt", "nl", "pl", "ru", "ar", "el", "sv", "no",
-                     "da", "fi", "he", "hi", "ja", "ko", "ms", "sw", "zh"):
-            self.vc_lang.addItem(code.upper(), code)
-        self.vc_lang.setFixedWidth(84)
-        row.addWidget(self.vc_get)
-        row.addStretch()
-        row.addWidget(QLabel(tr("vc_lang"), objectName="muted"))
-        row.addWidget(self.vc_lang)
-        vb.addLayout(row)
-        self.vc_btn = QPushButton(tr("vc_generate"), objectName="primary")
-        self.vc_btn.clicked.connect(self._generate_clone)
-        vb.addWidget(self.vc_btn)
-        f.addWidget(self.vc_box)
-        srow = QHBoxLayout()
-        srow.setSpacing(10)
-        self.vc_ring = RingProgress(44, 4)
-        self.vc_ring.hide()
-        self.vc_status = QLabel(objectName="faint")
-        self.vc_status.setWordWrap(True)
-        srow.addWidget(self.vc_ring)
-        srow.addWidget(self.vc_status, 1)
-        f.addLayout(srow)
-        self._refresh_clone_section()
-        if voiceclone.installed():
-            self._prefill_clone()
-
-    def _refresh_clone_section(self):
-        import voiceclone
-        ok = voiceclone.installed()
-        self.vc_install.setVisible(not ok and self.vc_dl is None)
-        self.vc_box.setVisible(ok)
-
-    def _download_plugin(self):
-        import voiceclone
-        self.vc_dl = d = voiceclone.Downloader()
-        _keep_alive(d)
-        d.progress.connect(lambda x: self._vc_progress(x, tr("vc_downloading", p=int(x * 100))))
-        d.done.connect(lambda: (self.vc_status.setText(""), self._refresh_clone_section(), self._prefill_clone()))
-        d.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
-        d.finished.connect(lambda: (setattr(self, "vc_dl", None), self._refresh_clone_section(), self.vc_ring.hide()))
-        self.vc_install.hide()
-        self.vc_status.setText(tr("vc_downloading", p=0))
-        d.start()
-
-    def _set_vc_text(self, text):
-        self._vc_prog_set = True
-        self.vc_text.setPlainText(text)
-        self._vc_prog_set = False
-
-    def _prefill_clone(self):
-        """Varsayılan: kaydın zaten yazıya dökülmüş metni (bölüm kaydın tamamıysa) ve algılanan dil.
-        Bölüm kaydın bir parçasıysa o parça arka planda yazıya dökülür. Kullanıcı değiştirebilir."""
-        p = self.params()
-        dur = self.item.duration or 0
-        whole = p["start"] <= 0.5 and p["start"] + p["length"] >= dur - 0.5
-        if whole and self.item.text.strip() and not self._vc_user_edited:
-            self._set_vc_text(self.item.text.strip())
-            self._fill_from_segment(force=False, text_too=False)  # yalnızca dili algıla
-        else:
-            self._fill_from_segment(force=False)
-
-    def _fill_from_segment(self, force, text_too=True):
-        """Bölümü (Standart model) yazıya dök: dili seç, metni kutuya koy (force değilse kullanıcının
-        yazdığına dokunma). Dil otomatik algılanır."""
-        from core import FileWorker, MODES
-        if self.vc_tr_worker is not None:
-            return
-        p = self.params()
-        w = self.vc_tr_worker = FileWorker(str(self.path), "small", None, False, MODES[1][1],
-                                           clip=(p["start"], p["start"] + p["length"]))
-        _keep_alive(w)
-        pieces = []
-        w.segment.connect(pieces.append)
-
-        def on_info(key, value):
-            if key == "detected_lang":
-                i = self.vc_lang.findData(value)
-                if i >= 0:
-                    self.vc_lang.setCurrentIndex(i)
-
-        def on_done(_elapsed):
-            if text_too and (force or not self._vc_user_edited):
-                self._set_vc_text("".join(pieces).strip())
-                if force:
-                    self._vc_user_edited = False
-        w.info.connect(on_info)
-        w.progress.connect(lambda d, t: self._vc_progress(d / t if t else 0, tr("vc_getting_text")))
-        w.finished_ok.connect(on_done)
-        w.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
-        w.finished.connect(lambda: (setattr(self, "vc_tr_worker", None), self.vc_get.setEnabled(True),
-                                    self.vc_status.setText(""), self.vc_ring.hide()))
-        self.vc_get.setEnabled(False)
-        self.vc_status.setText(tr("vc_getting_text"))
-        w.start()
-
-    def _generate_clone(self):
-        import os
-        import voiceclone
-        if self.vc_worker is not None:  # durdur
-            self.vc_worker.cancelled = True
-            return
-        text = self.vc_text.toPlainText().strip()
-        if not text or self.result is None:
-            return
-        # konuşmacı örneği: işlenmiş (gürültüsü ayıklanmış) bölüm varsa o, yoksa orijinal
-        ref = self.result["after"] if self.result.get("after") is not None else self.result["seg"]
-        w = self.vc_worker = voiceclone.CloneWorker(ref, text, self.vc_lang.currentData(), self._vc_threads())
-        _keep_alive(w)
-        t0 = time.monotonic()
-        msgs = {"load": tr("vc_load"), "speaker": tr("vc_speaker"), "synth": tr("vc_synth_stage")}
-        w.progress.connect(lambda p, k: self._vc_progress(p, f"{msgs[k]}  %{int(p * 100)}"))
-        w.done.connect(lambda wav: self._on_clone(wav, time.monotonic() - t0))
-        w.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
-        w.finished.connect(self._on_clone_end)
-        self.vc_btn.setText(tr("vc_stop"))
-        self.vc_btn.setObjectName("destructive")
-        self.vc_btn.style().unpolish(self.vc_btn)
-        self.vc_btn.style().polish(self.vc_btn)
-        w.start()
-
-    def _vc_threads(self):
-        import os
-        return max(2, (os.cpu_count() or 4) // 2)
-
-    def _prewarm(self):
-        import voiceclone
-        if voiceclone.installed() and not self._closed:
-            voiceclone.prewarm(self._vc_threads())
-
-    def _vc_progress(self, frac, text):
-        self.vc_ring.show()
-        self.vc_ring.set_value(frac)
-        self.vc_status.setText(text)
-
-    def _on_clone_end(self):
-        self.vc_worker = None
-        self.vc_ring.hide()
-        self.vc_btn.setText(tr("vc_generate"))
-        self.vc_btn.setObjectName("primary")
-        self.vc_btn.style().unpolish(self.vc_btn)
-        self.vc_btn.style().polish(self.vc_btn)
-
-    def _on_clone(self, wav24, took):
-        if self._closed or not len(wav24):
-            return
-        from voiceclone import SR as VSR
-        self.clone = wav24
-        if self._playing == "clone":
-            self.player.stop()
-            self.player.setSource(QUrl())
-            self._playing = None
-        write_wav(self.tmp / "clone.wav", wav24, VSR)
-        # spektrogram: diğer panellerle aynı ayarlarla (16 kHz'e indirerek)
-        y16 = np.interp(np.linspace(0, len(wav24) - 1, int(len(wav24) * SR / VSR)), np.arange(len(wav24)),
-                        wav24).astype(np.float32)
-        p = self._p if hasattr(self, "_p") else self.params()
-        S = dsp.stft(y16, p["n_fft"], p["hop"], p["window"])
-        db = dsp.to_db(np.abs(S))
-        db -= db.max()
-        img, rows = dsp.remap_freq(db, np.fft.rfftfreq(p["n_fft"], 1 / SR), p["axis"],
-                                   40 if p["axis"] != "linear" else 0, SR / 2, ROWS)
-        img = dsp.downsample_time(img, COLS)
-        lut = dsp.colormap(p["cmap"])
-        vmin = -p["range"]
-        self.v_clone.set_data(dsp.to_rgb(img, vmin, 0, lut), img, 0.0, len(y16) / SR, rows, tr("vc_panel"),
-                              vmin, 0, lut)
-        self._clone16 = y16
-        self.clone_panel.show()
-        self.play_times["clone"].setText("00:00")
-        for b in (self.vc_save_btn, self.vc_add_btn):
-            b.show()
-        self.vc_status.setText(tr("vc_done", s=f"{len(wav24) / VSR:.1f}", t=fmt_time(took)))
-
-    def export_clone(self, to_list):
-        from voiceclone import SR as VSR
-        if self.clone is None:
-            return
-        name = f"{self.item.title} {tr('vc_suffix')}"
-        if to_list:
-            from core import RecordingWriter
-            d = user_data_dir() / "processed"
-            d.mkdir(parents=True, exist_ok=True)
-            rw = RecordingWriter(d / name)
-            rw.write(self._clone16)
-            rw.close()
-            if self.on_added:
-                self.on_added(str(rw.path))
-            self.vc_status.setText(tr("saved_in", path=rw.path))
-            return
-        path, _ = QFileDialog.getSaveFileName(self, tr("vc_save"), str(Path.home() / (name + ".wav")), "WAV (*.wav)")
-        if path:
-            write_wav(path, self.clone, VSR)
-            self.vc_status.setText(tr("saved_in", path=path))
-
-
     def closeEvent(self, e):
         import shutil
         self._closed = True
         self.player.stop()
         self.player.setSource(QUrl())
         self.head_timer.stop()
-        for w in (self.vc_worker, self.vc_tr_worker, self.vc_dl):
-            if w is not None:
-                for sig in ("done", "failed", "progress", "segment", "finished_ok"):
-                    try:
-                        getattr(w, sig).disconnect()
-                    except (AttributeError, TypeError):
-                        pass
-                if hasattr(w, "cancel"):
-                    w.cancel()
-                w.cancelled = True
         if self.worker is not None:  # hesap sonucu artık gösterilmeyecek
             for sig in (self.worker.done, self.worker.failed):
                 try:
@@ -954,11 +692,8 @@ class AnalysisWindow(QWidget):
             if w is not None:
                 w.wait(3000)  # uzun iş (ör. 86 dk dışa aktarma) arka planda biter; _RUNNING yaşatır
         self.result = None  # son analizin dizileri (bölüm, spektrogramlar) bırakılsın
-        self.clone = None
-        for v in (self.v_before, self.v_after, self.v_diff, self.v_clone):
+        for v in (self.v_before, self.v_after, self.v_diff):
             v.clear()
         shutil.rmtree(self.tmp, ignore_errors=True)
-        import voiceclone
-        voiceclone.release_model()  # klonlama süreci biter, bellek tamamen geri verilir
         release_memory()
         e.accept()
