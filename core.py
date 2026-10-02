@@ -155,7 +155,7 @@ class ModelCache:
     kullanmayınca model bir süre sonra bellekten atılır (tekrar başlatmalar hızlı olsun diye
     hemen değil).
     """
-    IDLE_RELEASE_SEC = 180
+    IDLE_RELEASE_SEC = 90  # kullanılmayan model bellekte en fazla bu kadar kalır (hafiflik)
 
     def __init__(self):
         self._lock = threading.Lock()

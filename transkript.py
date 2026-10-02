@@ -501,23 +501,25 @@ class MainWindow(QMainWindow):
                 v.stop_for_quit()
         finally:
             QApplication.restoreOverrideCursor()
+        # oturum biter: hiçbir şey sonraki açılışa taşınmaz. Kaydedilmemiş kayıtlar klasöre kaydedilir ya da silinir.
         unsaved = self.lib.unsaved()
-        if unsaved:  # kaydedilmemiş kayıtlar: sakla (sonraki açılışta listede) / sil / vazgeç
+        target = None
+        if unsaved:
             box = QMessageBox(QMessageBox.Icon.Question, tr("quit_title"),
-                              tr("quit_unsaved", n=len(unsaved)), parent=self)
+                              tr("quit_unsaved", n=len(unsaved), folder=ItemView._short(self.folder)), parent=self)
             keep = box.addButton(tr("quit_keep"), QMessageBox.ButtonRole.AcceptRole)
             delete = box.addButton(tr("quit_delete"), QMessageBox.ButtonRole.DestructiveRole)
             box.addButton(QMessageBox.StandardButton.Cancel)
             box.setDefaultButton(keep)
             box.exec()
-            if box.clickedButton() is delete:
-                for it in unsaved:
-                    self.lib.remove(it, delete_files=True)
-            elif box.clickedButton() is not keep:
+            if box.clickedButton() is keep:
+                target = self.folder
+            elif box.clickedButton() is not delete:
                 e.ignore()
                 return
-        self.lib.items = [i for i in self.lib.items if not i.new]
-        self.lib.save_index()
+        for _, v in self.views.values():
+            v.player.release()
+        self.lib.end_session(move_unsaved_to=target)
         e.accept()
 
 
@@ -570,6 +572,31 @@ def _selftest_mic():
     print(f"mikrofon: {dev.description()} -> {sum(got) / 16000:.2f} sn ses okundu", flush=True)
 
 
+def install_error_handler():
+    """Beklenmeyen hata programı kapatmasın: günlüğe yaz (veri klasörü/errors.log) ve kullanıcıya göster.
+
+    PyQt6'da sinyal işleyicilerindeki yakalanmamış hatalar varsayılan olarak programı sonlandırır.
+    """
+    import traceback
+    from datetime import datetime
+    from core import user_data_dir
+
+    def hook(etype, value, tb):
+        text = "".join(traceback.format_exception(etype, value, tb))
+        try:
+            log = user_data_dir() / "errors.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"\n--- {datetime.now():%Y-%m-%d %H:%M:%S}\n{text}")
+        except OSError:
+            log = None
+        sys.__stderr__ and sys.__stderr__.write(text)
+        if QApplication.instance() is not None:
+            QMessageBox.warning(None, tr("error_title"),
+                                tr("unexpected_error", err=f"{etype.__name__}: {value}", log=log or "-"))
+    sys.excepthook = hook
+
+
 def main():
     if "--selftest" in sys.argv:
         if sys.stdout is None:  # pencereli exe'de konsol yok: çıktıyı dosyaya yaz
@@ -578,6 +605,7 @@ def main():
         selftest(sys.argv[i + 1] if len(sys.argv) > i + 1 else None)
         return
     lower_priority()
+    install_error_handler()
     app = QApplication(sys.argv)
     app.setApplicationName("Ders Transkript")
     app.setDesktopFileName("ders-transkript")  # Linux: görev çubuğunda doğru ikon

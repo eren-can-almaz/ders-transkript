@@ -193,6 +193,34 @@ class Library:
             self.items.remove(it)
         self.save_index()
 
+    def end_session(self, move_unsaved_to=None):
+        """Normal kapanış: oturumdan hiçbir şey kalmaz (uygulama hafif kalsın).
+
+        Kaydedilmemiş kayıtlar `move_unsaved_to` verilirse adlarıyla (ve transkriptleriyle) o klasöre
+        taşınır, verilmezse silinir. Liste, metin kopyaları, dalga önbellekleri, işlenmiş sesler temizlenir.
+        Kullanıcının kendi dosyalarına ve kaydedilmiş kayıtlara dokunulmaz.
+        """
+        moved = []
+        for it in self.unsaved():
+            if move_unsaved_to is not None:
+                dest_dir = Path(move_unsaved_to)
+                safe = "".join(ch for ch in it.title if ch not in '\\/:*?"<>|').strip() or it.id
+                dest = dest_dir / f"{safe}{it.audio.suffix}"
+                k = 2
+                while dest.exists():  # aynı ad varsa: "Kayıt 1 (2).m4a"
+                    dest = dest_dir / f"{safe} ({k}){it.audio.suffix}"
+                    k += 1
+                self.save_recording(it, dest)
+                moved.append(dest)
+            elif it.audio and it.audio.exists():
+                it.audio.unlink()
+        self.items = []
+        self.save_index()
+        for d in (texts_dir(), peaks_dir(), processed_dir(), unsaved_dir()):
+            if d.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+        return moved
+
     def save_recording(self, it, dest: Path):
         """Kaydı seçilen yere taşır; transkript varsa yanına aynı adla .txt yazar."""
         dest.parent.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,13 @@ from i18n import tr
 from theme import colors, glyph
 
 ROWS, COLS = 360, 1400  # spektrogram görüntü çözünürlüğü
+CWT_MAX_SEC = 60        # dalgacık dönüşümü ağır: bölüm üst sınırı
+_RUNNING = set()        # pencere kapansa da bitene kadar yaşayan işler (QThread çalışırken yok edilirse Qt çöker)
+
+
+def _keep_alive(worker):
+    _RUNNING.add(worker)
+    worker.finished.connect(lambda: _RUNNING.discard(worker))
 
 
 def write_wav(path, y, sr=SR):
@@ -267,10 +274,10 @@ class ExportWorker(QThread):
 
 class AnalysisWindow(QWidget):
     """Gelişmiş: bir öğenin sesi için spektrogram ve işleme ekranı."""
-    add_to_list = pyqtSignal(str)  # işlenmiş WAV'ı listeye ekle
 
-    def __init__(self, item, parent=None, start=None, end=None):
+    def __init__(self, item, parent=None, start=None, end=None, on_added=None):
         super().__init__(parent, Qt.WindowType.Window)
+        self.on_added = on_added  # işlenmiş ses listeye eklenince (pencere kapansa da çağrılır)
         self.setObjectName("content")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.item = item
@@ -280,6 +287,7 @@ class AnalysisWindow(QWidget):
         self.worker = None
         self.exporter = None
         self.result = None
+        self._closed = False
         self.tmp = Path(tempfile.mkdtemp(prefix="ders_transkript_an_"))
         self.setWindowTitle(tr("an_title", name=item.title))
         self.resize(1320, 900)
@@ -470,8 +478,7 @@ class AnalysisWindow(QWidget):
         cwt = self.transform.currentData() == "cwt"
         self.stft_box.setVisible(not cwt)
         self.cwt_box.setVisible(cwt)
-        if cwt and self.length.value() > 60:  # dalgacık dönüşümü ağır: bölümü kısalt
-            self.length.setValue(60)
+        self.length.setMaximum(CWT_MAX_SEC if cwt else 300)  # dalgacık dönüşümü ağır: bölüm sınırlı
 
     def params(self):
         n_fft = self.n_fft.currentData()
@@ -509,6 +516,7 @@ class AnalysisWindow(QWidget):
         self.compute_btn.setText(tr("an_computing"))
         self._p = self.params()
         self.worker = ComputeWorker(self, self._p)
+        _keep_alive(self.worker)
         self.worker.done.connect(self._on_done)
         self.worker.failed.connect(lambda m: self.info.setText(tr("error") + "  " + m))
         self.worker.finished.connect(self._on_worker_end)
@@ -520,6 +528,8 @@ class AnalysisWindow(QWidget):
         self.compute_btn.setText(tr("an_compute"))
 
     def _on_done(self, out):
+        if self._closed:  # pencere hesap sürerken kapatıldı: geç gelen sonucu yok say
+            return
         self.result = out
         p = self._p
         lut = dsp.colormap(p["cmap"])
@@ -635,21 +645,42 @@ class AnalysisWindow(QWidget):
                 return
             dest = Path(path)
         self.exporter = ExportWorker(self, self._p, dest)
-        self.exporter.progress.connect(lambda x: self.info.setText(tr("an_exporting", p=int(x * 100))))
-        self.exporter.done.connect(lambda p: (self.info.setText(tr("saved_in", path=p)),
-                                              to_list and self.add_to_list.emit(p)))
-        self.exporter.failed.connect(lambda m: self.info.setText(tr("error") + "  " + m))
+        _keep_alive(self.exporter)
+        self._ui_progress = lambda x: self.info.setText(tr("an_exporting", p=int(x * 100)))
+        self._ui_done = lambda p: self.info.setText(tr("saved_in", path=p))
+        self._ui_failed = lambda m: self.info.setText(tr("error") + "  " + m)
+        self.exporter.progress.connect(self._ui_progress)
+        self.exporter.done.connect(self._ui_done)
+        self.exporter.failed.connect(self._ui_failed)
+        if to_list and self.on_added:  # pencere kapatılsa da listeye eklensin
+            self.exporter.done.connect(self.on_added)
         self.exporter.finished.connect(lambda: setattr(self, "exporter", None))
         self.info.setText(tr("an_exporting", p=0))
         self.exporter.start()
 
     def closeEvent(self, e):
         import shutil
+        self._closed = True
         self.player.stop()
         self.player.setSource(QUrl())
+        self.head_timer.stop()
+        if self.worker is not None:  # hesap sonucu artık gösterilmeyecek
+            for sig in (self.worker.done, self.worker.failed):
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass
+        if self.exporter is not None:  # yalnızca bu pencerenin ekranını güncelleyen bağlantılar kesilir
+            for sig, slot in ((self.exporter.progress, self._ui_progress), (self.exporter.done, self._ui_done),
+                              (self.exporter.failed, self._ui_failed)):
+                try:
+                    sig.disconnect(slot)
+                except TypeError:
+                    pass
         for w in (self.worker, self.exporter):
             if w is not None:
-                w.wait(10000)
-        self.audio = None  # çözülmüş tam ses (uzun kayıtta yüzlerce MB) bırakılsın
+                w.wait(3000)  # uzun iş (ör. 86 dk dışa aktarma) arka planda biter; _RUNNING yaşatır
+        if not any(w is not None and w.isRunning() for w in (self.worker, self.exporter)):
+            self.audio = None  # çözülmüş tam ses (uzun kayıtta yüzlerce MB) bırakılsın
         shutil.rmtree(self.tmp, ignore_errors=True)
         e.accept()

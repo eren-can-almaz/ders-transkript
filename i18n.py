@@ -79,8 +79,9 @@ STRINGS = {
 
         # çıkış / hata
         "quit_title": "Çıkış", "quit_body": "Devam eden bir işlem var. Çıkılsın mı?",
-        "quit_unsaved": "{n} kayıt henüz kaydedilmedi.\n\nSaklarsanız bir sonraki açılışta listede olurlar.",
-        "quit_keep": "Sakla ve çık", "quit_delete": "Sil ve çık", "error_title": "Hata",
+        "quit_unsaved": "{n} kayıt henüz kaydedilmedi.\n\nUygulama kapanınca liste temizlenir. Kayıtları kayıt klasörüne ({folder}) adlarıyla kaydedebilir ya da silebilirsiniz.",
+        "quit_keep": "Klasöre kaydet ve çık", "quit_delete": "Sil ve çık", "error_title": "Hata",
+        "unexpected_error": "Beklenmeyen bir hata oluştu; uygulama çalışmaya devam ediyor.\n\n{err}\n\nAyrıntılar: {log}",
         "rename": "Yeniden adlandır", "rename_tip": "Adını değiştirmek için tıklayın", "rename_exists": "Bu adda bir dosya zaten var:\n{path}",
         "wave_hint": "Aralık seçmek için dalganın üzerinde sürükleyin  ·  tekerlek: yakınlaştır  ·  Shift+tekerlek: kaydır",
         "sel_fmt": "Seçili aralık  {a} – {b}  ({d})", "sel_play": "Aralığı oynat", "sel_transcribe": "Aralığı yazıya dök",
@@ -185,8 +186,9 @@ STRINGS = {
         "change": "Change…", "open": "Open", "folder_dialog": "Choose the recordings folder", "close": "Close",
 
         "quit_title": "Quit", "quit_body": "A task is still running. Quit anyway?",
-        "quit_unsaved": "{n} recording(s) are not saved yet.\n\nIf you keep them, they will be listed again next time.",
-        "quit_keep": "Keep and quit", "quit_delete": "Delete and quit", "error_title": "Error",
+        "quit_unsaved": "{n} recording(s) are not saved yet.\n\nThe list is cleared when the app closes. Save them to the recordings folder ({folder}) under their names, or delete them.",
+        "quit_keep": "Save to folder and quit", "quit_delete": "Delete and quit", "error_title": "Error",
+        "unexpected_error": "An unexpected error occurred; the app keeps running.\n\n{err}\n\nDetails: {log}",
         "rename": "Rename", "rename_tip": "Click to rename", "rename_exists": "A file with this name already exists:\n{path}",
         "wave_hint": "Drag across the waveform to select a range  ·  wheel: zoom  ·  Shift+wheel: scroll",
         "sel_fmt": "Selected range  {a} – {b}  ({d})", "sel_play": "Play range", "sel_transcribe": "Transcribe range",
@@ -289,8 +291,9 @@ STRINGS = {
         "change": "Ändern…", "open": "Öffnen", "folder_dialog": "Aufnahmeordner wählen", "close": "Schließen",
 
         "quit_title": "Beenden", "quit_body": "Es läuft noch ein Vorgang. Trotzdem beenden?",
-        "quit_unsaved": "{n} Aufnahme(n) sind noch nicht gespeichert.\n\nBehalten Sie sie, erscheinen sie beim nächsten Start wieder.",
-        "quit_keep": "Behalten und beenden", "quit_delete": "Löschen und beenden", "error_title": "Fehler",
+        "quit_unsaved": "{n} Aufnahme(n) sind noch nicht gespeichert.\n\nBeim Beenden wird die Liste geleert. Speichern Sie sie unter ihrem Namen im Aufnahmeordner ({folder}) oder löschen Sie sie.",
+        "quit_keep": "In Ordner speichern und beenden", "quit_delete": "Löschen und beenden", "error_title": "Fehler",
+        "unexpected_error": "Ein unerwarteter Fehler ist aufgetreten; die App läuft weiter.\n\n{err}\n\nDetails: {log}",
         "rename": "Umbenennen", "rename_tip": "Zum Umbenennen klicken", "rename_exists": "Eine Datei mit diesem Namen existiert bereits:\n{path}",
         "wave_hint": "Zum Auswählen eines Bereichs über die Wellenform ziehen  ·  Rad: zoomen  ·  Umschalt+Rad: scrollen",
         "sel_fmt": "Ausgewählter Bereich  {a} – {b}  ({d})", "sel_play": "Bereich abspielen", "sel_transcribe": "Bereich transkribieren",

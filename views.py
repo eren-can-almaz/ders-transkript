@@ -738,8 +738,7 @@ class ItemView(QWidget):
         """Gelişmiş: spektrogram / gürültü ayıklama / yeniden sentez penceresi (isteğe bağlı aralıkla)."""
         from analysis import AnalysisWindow
         self.player.pause()
-        win = AnalysisWindow(self.item, self.window(), start=start, end=end)
-        win.add_to_list.connect(self.add_audio)
+        win = AnalysisWindow(self.item, self.window(), start=start, end=end, on_added=self.add_audio.emit)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         win.show()
 
