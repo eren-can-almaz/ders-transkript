@@ -22,6 +22,14 @@ def unsaved_dir() -> Path:
     return d
 
 
+def peaks_dir() -> Path:
+    return user_data_dir() / "peaks"
+
+
+def processed_dir() -> Path:
+    return user_data_dir() / "processed"
+
+
 def texts_dir() -> Path:
     d = user_data_dir() / "texts"
     d.mkdir(parents=True, exist_ok=True)
@@ -95,6 +103,24 @@ class Library:
                 self.items.append(it)
         self.items.sort(key=lambda i: i.created, reverse=True)
         self.save_index()
+        self.cleanup()
+
+    def cleanup(self):
+        """Hiçbir öğeye ait olmayan artıkları sil: dalga önbellekleri, metinler, uygulamanın ürettiği
+        işlenmiş sesler, eski analiz geçici klasörleri. (Kullanıcının kendi dosyalarına dokunulmaz.)"""
+        import tempfile
+        import time
+        ids = {it.id for it in self.items}
+        audios = {it.audio for it in self.items if it.audio}
+        for d, keep in ((peaks_dir(), lambda p: p.stem in ids), (texts_dir(), lambda p: p.stem in ids),
+                        (processed_dir(), lambda p: p in audios)):
+            if d.is_dir():
+                for p in d.iterdir():
+                    if p.is_file() and not keep(p):
+                        p.unlink(missing_ok=True)
+        for p in Path(tempfile.gettempdir()).glob("ders_transkript_an_*"):
+            if time.time() - p.stat().st_mtime > 3600:  # açık bir analiz penceresine ait olamaz
+                shutil.rmtree(p, ignore_errors=True)
 
     def save_index(self):
         data = {"items": [it.to_json() for it in self.items if not it.new]}
@@ -158,6 +184,9 @@ class Library:
         """delete_files: kaydedilmemiş kaydın sesi de silinir. Kaydedilmiş/eklenmiş dosyalara dokunulmaz."""
         if delete_files and it.kind == "rec" and not it.saved and it.audio and it.audio.exists():
             it.audio.unlink()
+        if it.audio and it.audio.parent == processed_dir():  # uygulamanın ürettiği işlenmiş ses
+            it.audio.unlink(missing_ok=True)
+        (peaks_dir() / f"{it.id}.npy").unlink(missing_ok=True)
         if it.text_path.exists():
             it.text_path.unlink()
         if it in self.items:

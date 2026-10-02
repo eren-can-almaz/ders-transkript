@@ -251,7 +251,15 @@ class ExportWorker(QThread):
                 w.audio = decode_audio(str(w.path))
             y, _ = dsp.process(w.audio, SR, denoise=p["denoise"], boost_db=p["boost"], trim=p["trim"],
                                profile=w.noise_profile(p), progress=self.progress.emit)
-            write_wav(self.dest, y)
+            if self.dest.suffix.lower() == ".m4a":  # listeye eklenen: sıkıştırılmış (≈ 15 MB/saat)
+                from core import RecordingWriter
+                rw = RecordingWriter(self.dest.with_suffix(""))
+                for i in range(0, len(y), SR * 10):
+                    rw.write(y[i:i + SR * 10])
+                rw.close()
+                self.dest = rw.path
+            else:
+                write_wav(self.dest, y)
             self.done.emit(str(self.dest))
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")
@@ -620,7 +628,7 @@ class AnalysisWindow(QWidget):
         if to_list:
             d = user_data_dir() / "processed"
             d.mkdir(parents=True, exist_ok=True)
-            dest = d / name
+            dest = d / (Path(name).stem + ".m4a")
         else:
             path, _ = QFileDialog.getSaveFileName(self, tr("an_export"), str(Path.home() / name), "WAV (*.wav)")
             if not path:
@@ -636,8 +644,12 @@ class AnalysisWindow(QWidget):
         self.exporter.start()
 
     def closeEvent(self, e):
+        import shutil
         self.player.stop()
+        self.player.setSource(QUrl())
         for w in (self.worker, self.exporter):
             if w is not None:
                 w.wait(10000)
+        self.audio = None  # çözülmüş tam ses (uzun kayıtta yüzlerce MB) bırakılsın
+        shutil.rmtree(self.tmp, ignore_errors=True)
         e.accept()

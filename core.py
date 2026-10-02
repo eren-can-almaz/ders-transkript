@@ -117,7 +117,16 @@ def decode_audio(path: str, sr: int = SR):
             chunks.append(f.to_ndarray().reshape(-1))
     if not chunks:
         raise ValueError("no audio")
-    return np.concatenate(chunks).astype(np.float32) / 32768.0
+    # tek seferde ayrılan float32 diziye doldur: birleştir + dönüştür + böl ara kopyaları olmadan
+    # (86 dk kayıtta tepe bellek ~800 MB → ~500 MB)
+    out = np.empty(sum(len(c) for c in chunks), np.float32)
+    pos = 0
+    for c in chunks:
+        out[pos:pos + len(c)] = c
+        pos += len(c)
+    chunks.clear()
+    out *= 1.0 / 32768.0
+    return out
 
 
 def probe_audio(path):
@@ -328,7 +337,7 @@ class RecordingWriter:
 # Canlı kaydın ayarlanabilir değerleri (Ayarlar › Gelişmiş). "Varsayılanlar" bunlara döner.
 LIVE_DEFAULTS = {
     "draft_model": "base",   # önizleme modeli: tiny (en hızlı) / base / small (en doğru)
-    "draft_threads": 4,      # önizleme iş parçacığı
+    "draft_threads": min(4, max(2, _N_CPU // 4)),  # önizleme iş parçacığı (az çekirdekte 2)
     "draft_interval": 0.7,   # sn; önizleme yenileme aralığı
     "silence_tail": 0.5,     # sn; metni kesinleştiren duraklama
     "min_chunk": 2.0,        # sn; kesinleştirilen en kısa parça

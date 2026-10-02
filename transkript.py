@@ -495,8 +495,12 @@ class MainWindow(QMainWindow):
                     != QMessageBox.StandardButton.Yes:
                 e.ignore()
                 return
-        for v in views:
-            v.stop_for_quit()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)  # son parça işlenirken (birkaç sn) donmuş sanılmasın
+        try:
+            for v in views:
+                v.stop_for_quit()
+        finally:
+            QApplication.restoreOverrideCursor()
         unsaved = self.lib.unsaved()
         if unsaved:  # kaydedilmemiş kayıtlar: sakla (sonraki açılışta listede) / sil / vazgeç
             box = QMessageBox(QMessageBox.Icon.Question, tr("quit_title"),
