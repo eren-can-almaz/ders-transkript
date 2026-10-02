@@ -217,8 +217,9 @@ class FileWorker(QThread):
     finished_ok = pyqtSignal(float)      # geçen süre
     failed = pyqtSignal(str)
 
-    def __init__(self, audio_path, model_name, language, timestamps, threads):
+    def __init__(self, audio_path, model_name, language, timestamps, threads, clip=None):
         super().__init__()
+        self.clip = clip  # (başlangıç sn, bitiş sn): yalnızca bu aralığı yazıya dök
         self.audio_path = audio_path
         self.model_name = model_name
         self.language = language
@@ -240,6 +241,10 @@ class FileWorker(QThread):
                 return
             self.step.emit(1)
             audio = decode_audio(self.audio_path)
+            offset = 0.0
+            if self.clip:
+                offset = self.clip[0]
+                audio = audio[int(self.clip[0] * SR): int(self.clip[1] * SR)]
             if self.cancelled:
                 return
             self.step.emit(2)
@@ -260,8 +265,9 @@ class FileWorker(QThread):
                 text = seg.text.strip()
                 if not text:
                     continue
-                self.segment.emit(join_piece(text, seg.start, last_end, self.timestamps))
-                last_end = seg.end
+                # zaman damgaları kaydın başına göre (aralık seçildiyse aralık başı eklenir)
+                self.segment.emit(join_piece(text, seg.start + offset, last_end, self.timestamps))
+                last_end = seg.end + offset
             self.progress.emit(duration, duration)
             self.finished_ok.emit(time.time() - t0)
         except Exception as e:

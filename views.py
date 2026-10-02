@@ -23,7 +23,7 @@ from core import SR, FileWorker, LiveWorker, fmt_time
 from i18n import fmt_date, tr
 from library import unsaved_dir
 from theme import colors, glyph
-from ui_parts import Options, PlayerBar, RecordButton, TranscriptBox, Waveform, repolish
+from ui_parts import Options, PeaksWorker, PlayerBar, RecordButton, TranscriptBox, Waveform, WaveView, repolish
 
 STEPS = ["step_model", "step_read", "step_transcribe"]
 
@@ -32,6 +32,7 @@ class ItemView(QWidget):
     row_status = pyqtSignal(str, str)   # (metin, tür) — kenar çubuğu rozeti
     row_refresh = pyqtSignal()          # başlık / süre değişti
     add_audio = pyqtSignal(str)         # (gelişmiş) işlenmiş sesi listeye ekle
+    close_page = pyqtSignal()           # × : sayfayı kapat (öğe listede kalır)
     closed = pyqtSignal(object)         # öğe listeden kalktı
     LAG_WARN = 25.0
 
@@ -69,7 +70,9 @@ class ItemView(QWidget):
         self.save_btn.clicked.connect(self.save)
         self.delete_btn = QPushButton(objectName="destructive")
         self.delete_btn.clicked.connect(self.delete)
-        for b in (self.reveal_btn, self.save_btn, self.delete_btn):
+        self.close_btn = QPushButton("×", objectName="closePage")
+        self.close_btn.clicked.connect(self.close_page)
+        for b in (self.reveal_btn, self.save_btn, self.delete_btn, self.close_btn):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             head.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
         lay.addLayout(head)
@@ -131,9 +134,44 @@ class ItemView(QWidget):
         rb.addWidget(self.warn)
         lay.addWidget(self.rec_block)
 
-        # ---- oynatıcı + yazıya dök (bitmiş öğelerde)
+        # ---- genlik dalgası (tıkla: git, sürükle: aralık seç) + oynatıcı
+        self.wave_view = WaveView()
+        self.wave_view.seek.connect(self._seek)
+        self.wave_view.selection_changed.connect(self._on_selection)
+        lay.addWidget(self.wave_view)
         self.player = PlayerBar()
-        lay.addWidget(self.player)
+        self.player.slider.hide()  # konum çubuğunun yerini dalga alır
+        self.player.player.positionChanged.connect(self._on_pos)
+        self.play_row = QWidget()
+        prl = QHBoxLayout(self.play_row)
+        prl.setContentsMargins(0, 0, 0, 0)
+        prl.addWidget(self.player)
+        prl.addStretch()
+        self.wave_hint = QLabel(objectName="faint")
+        prl.addWidget(self.wave_hint)
+        lay.addWidget(self.play_row)
+        self.sel_row = QWidget()
+        sr_l = QHBoxLayout(self.sel_row)
+        sr_l.setContentsMargins(0, 0, 0, 0)
+        sr_l.setSpacing(8)
+        self.sel_label = QLabel(objectName="sectionTitle")
+        self.sel_play = QPushButton(objectName="tinted")
+        self.sel_play.clicked.connect(self._play_range)
+        self.sel_tr = QPushButton(objectName="primary")
+        self.sel_tr.clicked.connect(lambda: self.transcribe(clip=self.wave_view.sel))
+        self.sel_an = QPushButton(objectName="tinted")
+        self.sel_an.clicked.connect(lambda: self.open_analysis(*self.wave_view.sel))
+        self.sel_clear = QPushButton("×", objectName="plain")
+        self.sel_clear.clicked.connect(lambda: self.wave_view.set_selection(None))
+        sr_l.addWidget(self.sel_label)
+        sr_l.addStretch()
+        for b in (self.sel_play, self.sel_tr, self.sel_an, self.sel_clear):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            sr_l.addWidget(b)
+        self.sel_row.hide()
+        lay.addWidget(self.sel_row)
+        self._range_end = None
+        self._peaks_worker = None
         self.tr_row = QWidget()
         tl = QHBoxLayout(self.tr_row)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -205,6 +243,8 @@ class ItemView(QWidget):
         self.note = QLabel(objectName="faint")
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
+        self.filler = QWidget()  # transkript kutusu gizliyken boş alanı alta toplar
+        lay.addWidget(self.filler, 1)
 
         self.ticker = QTimer(self)
         self.ticker.timeout.connect(self._tick)
@@ -227,7 +267,7 @@ class ItemView(QWidget):
         self.rec_block.setVisible(session)
         self.mic_widget.setVisible(session)
         has_audio = it.audio is not None and not session
-        self.player.setVisible(has_audio)
+        self.play_row.setVisible(has_audio)
         self.tr_row.setVisible(has_audio or (session and self.rec_state == "new"))
         if session and self.rec_state != "new":
             self.opt_panel.hide()
@@ -235,9 +275,17 @@ class ItemView(QWidget):
         self.an_btn.setVisible(has_audio and self.settings.value("adv/enabled", False, type=bool))
         if has_audio and self.player.path != it.audio:
             self.player.set_source(it.audio, it.duration)
+            self._load_peaks()
+        self.wave_view.setVisible(has_audio)
+        self.wave_hint.setVisible(has_audio and self.wave_view.sel is None)
+        self.sel_row.setVisible(has_audio and self.wave_view.sel is not None)
+        self.sel_an.setVisible(self.settings.value("adv/enabled", False, type=bool))
+        self.sel_tr.setEnabled(self.file_worker is None)
         live_on = session and self.live_text.isChecked()
-        self.box.setVisible(bool(it.text.strip()) or live_on or self.file_worker is not None
-                            or (session and self.rec_state != "new" and self.live_text.isChecked()))
+        box_on = (bool(it.text.strip()) or live_on or self.file_worker is not None
+                  or (session and self.rec_state != "new" and self.live_text.isChecked()))
+        self.box.setVisible(box_on)
+        self.filler.setVisible(not box_on)  # (isVisible() sayfa ekranda değilken hep False döner)
         self.box.set_placeholder("placeholder_live" if session else
                                  "placeholder_file" if self.file_worker else "placeholder_none")
         # başlıktaki eylemler
@@ -284,6 +332,13 @@ class ItemView(QWidget):
 
     def retranslate(self):
         self.save_btn.setText(tr("save"))
+        self.close_btn.setToolTip(tr("close_page"))
+        self.wave_hint.setText(tr("wave_hint"))
+        self.sel_play.setText("▶  " + tr("sel_play"))
+        self.sel_tr.setText(tr("sel_transcribe"))
+        self.sel_an.setText(tr("sel_analyze"))
+        self.sel_clear.setToolTip(tr("sel_clear"))
+        self._on_selection(self.wave_view.sel, emit=False)
         self.an_btn.setText(tr("analysis"))
         self.reveal_btn.setText(tr("show_in_folder"))
         self.mic_label.setText(tr("mic"))
@@ -482,7 +537,7 @@ class ItemView(QWidget):
             self._set_rec_state("new")
 
     # ================================================================ yazıya dökme
-    def transcribe(self):
+    def transcribe(self, clip=None):
         if self.file_worker is not None:
             self.file_worker.cancel()
             self.tr_btn.setEnabled(False)
@@ -491,8 +546,9 @@ class ItemView(QWidget):
         if self.item.text.strip():
             if QMessageBox.question(self, tr("retranscribe"), tr("replace_q")) != QMessageBox.StandardButton.Yes:
                 return
+        self._clip = clip
         w = self.file_worker = FileWorker(str(self.item.audio), self.opts.model_name(), self.opts.language(),
-                                          self.opts.timestamps(), self.opts.threads())
+                                          self.opts.timestamps(), self.opts.threads(), clip=clip)
         w.step.connect(self._on_step)
         w.info.connect(lambda k, v: self._set_note(tr(k, v=v)))
         w.progress.connect(self._on_progress)
@@ -553,7 +609,10 @@ class ItemView(QWidget):
                 it.audio.with_suffix(".txt").write_text(it.text, encoding="utf-8")
             except OSError:
                 pass
-        self._set_note(tr("done_fmt", t=fmt_time(elapsed)))
+        note = tr("done_fmt", t=fmt_time(elapsed))
+        if self._clip:
+            note = tr("range_done", a=fmt_time(self._clip[0]), b=fmt_time(self._clip[1])) + "  ·  " + note
+        self._set_note(note)
         QApplication.alert(self.window())
 
     def _on_tr_thread_end(self):
@@ -644,14 +703,47 @@ class ItemView(QWidget):
         self._store_text()
         self.player.release()
 
-    def open_analysis(self):
-        """Gelişmiş: spektrogram / gürültü ayıklama / yeniden sentez penceresi."""
+    def open_analysis(self, start=None, end=None):
+        """Gelişmiş: spektrogram / gürültü ayıklama / yeniden sentez penceresi (isteğe bağlı aralıkla)."""
         from analysis import AnalysisWindow
         self.player.pause()
-        win = AnalysisWindow(self.item, self.window())
+        win = AnalysisWindow(self.item, self.window(), start=start, end=end)
         win.add_to_list.connect(self.add_audio)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         win.show()
+
+    # ================================================================ dalga / aralık
+    def _load_peaks(self):
+        from core import user_data_dir
+        self.wave_view.set_peaks(None, self.item.duration)
+        w = self._peaks_worker = PeaksWorker(self.item.audio, user_data_dir() / "peaks" / f"{self.item.id}.npy")
+        w.done.connect(lambda pk: self.wave_view.set_peaks(pk, self.item.duration))
+        w.start()
+
+    def _seek(self, sec):
+        self._range_end = None
+        self.player.seek_to(sec)
+        self.wave_view.set_position(sec)
+
+    def _on_pos(self, ms):
+        sec = ms / 1000
+        self.wave_view.set_position(sec)
+        if self._range_end is not None and sec >= self._range_end:  # aralık sonu: dur
+            self._range_end = None
+            self.player.pause()
+
+    def _play_range(self):
+        sel = self.wave_view.sel
+        if sel:
+            self._range_end = sel[1]
+            self.player.play_from(sel[0])
+
+    def _on_selection(self, sel, emit=True):
+        if sel:
+            a, b = sel
+            self.sel_label.setText(tr("sel_fmt", a=fmt_time(a), b=fmt_time(b), d=fmt_time(b - a)))
+        if emit:
+            self._layout_state()
 
     def refresh_icons(self):
         self._render_rec()

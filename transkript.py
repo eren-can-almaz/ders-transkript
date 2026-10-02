@@ -58,10 +58,13 @@ class EmptyState(QWidget):
         outer.addLayout(col)
         outer.addStretch(3)
 
-    def retranslate(self):
+    def retranslate(self, has_items=None):
         c = colors()
-        self.title.setText(tr("empty_title"))
-        self.hint.setText(tr("empty_hint"))
+        if has_items is not None:
+            self._has_items = has_items
+        some = getattr(self, "_has_items", False)
+        self.title.setText(tr("empty_title_some" if some else "empty_title"))
+        self.hint.setText(tr("empty_hint_some" if some else "empty_hint"))
         self.btn_rec.setText("   " + tr("new_recording"))
         self.btn_file.setText("   " + tr("add_file"))
         self.btn_rec.setIcon(glyph("mic", c["red"]))
@@ -335,6 +338,7 @@ class MainWindow(QMainWindow):
             v.row_refresh.connect(lambda it=it: self.rows[it.id].refresh())
             v.closed.connect(self._on_closed)
             v.add_audio.connect(lambda p: self.add_files([p]))
+            v.close_page.connect(lambda: self.select(None))
             area = QScrollArea()
             area.setWidgetResizable(True)
             area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -348,6 +352,7 @@ class MainWindow(QMainWindow):
         for iid, row in self.rows.items():
             row.set_selected(it is not None and iid == it.id)
         if it is None:
+            self.empty.retranslate(bool(self.lib.items))
             self.stack.setCurrentWidget(self.empty)
             return
         area, _ = self._view(it)

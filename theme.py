@@ -88,6 +88,11 @@ QPushButton#add:hover {{ background: {accent}; color: {on_accent}; }}
 QPushButton#add::menu-indicator {{ image: none; width: 0; }}
 QPushButton#gear {{ background: transparent; color: {muted}; padding: 6px 10px; text-align: left; font-weight: 500; }}
 QPushButton#gear:hover {{ background: {fill2}; color: {text}; }}
+QPushButton#closePage {{
+    background: transparent; color: {faint}; font-size: 22px; font-weight: 300; border-radius: 16px; padding: 0;
+    min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px;
+}}
+QPushButton#closePage:hover {{ background: {fill}; color: {text}; }}
 QPushButton#round {{
     background: {fill}; border-radius: 22px; padding: 0;
     min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px;

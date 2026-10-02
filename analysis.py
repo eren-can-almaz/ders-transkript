@@ -240,7 +240,7 @@ class AnalysisWindow(QWidget):
     """Gelişmiş: bir öğenin sesi için spektrogram ve işleme ekranı."""
     add_to_list = pyqtSignal(str)  # işlenmiş WAV'ı listeye ekle
 
-    def __init__(self, item, parent=None):
+    def __init__(self, item, parent=None, start=None, end=None):
         super().__init__(parent, Qt.WindowType.Window)
         self.setObjectName("content")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -299,6 +299,9 @@ class AnalysisWindow(QWidget):
         section("an_segment")
         self.start = row("an_start", QDoubleSpinBox(decimals=1, maximum=max(0.0, dur - 1), suffix=" s"))
         self.length = row("an_length", QDoubleSpinBox(decimals=1, minimum=1, maximum=300, value=min(30, dur), suffix=" s"))
+        if start is not None:  # dalgada seçilen aralıkla aç
+            self.start.setValue(start)
+            self.length.setValue(min(300.0, max(1.0, end - start)))
 
         section("an_transform")
         self.transform = row("an_method", combo([("tf_stft", "stft"), ("tf_cwt", "cwt")]))

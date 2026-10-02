@@ -1,8 +1,10 @@
 """Arayüz parçaları: ses dalgası, kayıt düğmesi, oynatıcı, transkript kutusu, seçenekler, liste satırı."""
+import math
 from collections import deque
 from pathlib import Path
 
-from PyQt6.QtCore import QRectF, QSize, Qt, QTimer, QUrl, QVariantAnimation, pyqtSignal
+import numpy as np
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QTimer, QUrl, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPalette, QTextCharFormat
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
@@ -160,6 +162,18 @@ class PlayerBar(QWidget):
                 other.pause()
         if self.player.source().isEmpty() and self.path:
             self.player.setSource(QUrl.fromLocalFile(str(self.path)))
+        self.player.play()
+
+    def seek_to(self, sec):
+        if self.player.source().isEmpty() and self.path:
+            self.player.setSource(QUrl.fromLocalFile(str(self.path)))
+        self.player.setPosition(int(sec * 1000))
+
+    def play_from(self, sec):
+        for other in PlayerBar._all:
+            if other is not self:
+                other.pause()
+        self.seek_to(sec)
         self.player.play()
 
     def pause(self):
@@ -490,3 +504,196 @@ class ItemRow(QFrame):
         self.badge.setText(text)
         self.badge.setProperty("kind", kind)
         repolish(self.badge)
+
+
+class PeaksWorker(QThread):
+    """Sesin genlik zarfı: saniyede 100 kova (min, max). Diskte önbelleğe alınır."""
+    done = pyqtSignal(object)
+    RATE = 100  # kova / sn
+
+    def __init__(self, audio_path, cache_path):
+        super().__init__()
+        self.audio_path, self.cache_path = Path(audio_path), Path(cache_path)
+
+    def run(self):
+        import numpy as np
+        from core import SR, decode_audio
+        try:
+            if self.cache_path.exists() and self.cache_path.stat().st_mtime >= self.audio_path.stat().st_mtime:
+                self.done.emit(np.load(self.cache_path))
+                return
+            a = decode_audio(str(self.audio_path))
+            step = SR // self.RATE
+            n = len(a) // step
+            b = a[: n * step].reshape(n, step)
+            peaks = np.stack([b.min(axis=1), b.max(axis=1)], axis=1).astype(np.float32)
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(self.cache_path, peaks)
+            self.done.emit(peaks)
+        except Exception:
+            self.done.emit(None)
+
+
+class WaveView(QWidget):
+    """Genlik dalgası (Ses Kayıtları tarzı): tıkla = git, sürükle = aralık seç, çift tık = seçimi kaldır,
+    tekerlek = yakınlaştır, Shift+tekerlek = kaydır."""
+    seek = pyqtSignal(float)
+    selection_changed = pyqtSignal(object)  # (başlangıç, bitiş) ya da None
+    BAR, GAP = 2, 1
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(128)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.IBeamCursor)
+        self.peaks = None
+        self.duration = 0.0
+        self.pos_s = 0.0
+        self.sel = None
+        self.v0 = self.v1 = 0.0
+        self._press = None
+        self._hover = None
+
+    def set_peaks(self, peaks, duration):
+        self.peaks = peaks
+        self.duration = duration or (len(peaks) / PeaksWorker.RATE if peaks is not None else 0)
+        self.v0, self.v1 = 0.0, max(self.duration, 0.1)
+        # kova başına tepe genliği; sütunlarda bunların ortalaması çizilir (uzun kayıtta da konuşma ve
+        # duraklamalar ayırt edilsin — en büyük değer her sütunu doldururdu)
+        self._env = np.maximum(-peaks[:, 0], peaks[:, 1]) if peaks is not None and len(peaks) else None
+        self.update()
+
+    def set_position(self, sec):
+        self.pos_s = sec
+        if self.v1 - self.v0 < self.duration and not (self.v0 <= sec <= self.v1):  # yakınlaştırılmışsa takip et
+            w = self.v1 - self.v0
+            self.v0 = min(max(0.0, sec - w * 0.1), self.duration - w)
+            self.v1 = self.v0 + w
+        self.update()
+
+    def set_selection(self, sel):
+        self.sel = sel
+        self.update()
+        self.selection_changed.emit(sel)
+
+    # --- koordinat dönüşümü
+    def _plot(self):
+        return QRectF(0, 4, self.width(), self.height() - 24)
+
+    def _t(self, x):
+        return max(0.0, min(self.duration, self.v0 + x / max(self.width(), 1) * (self.v1 - self.v0)))
+
+    def _x(self, t):
+        return (t - self.v0) / max(self.v1 - self.v0, 1e-9) * self.width()
+
+    def paintEvent(self, e):
+        c = colors()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self._plot()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(c["fill"]))
+        p.drawRoundedRect(r, 12, 12)
+        if self.peaks is None or not len(self.peaks):
+            return
+        mid, half = r.center().y(), r.height() / 2 - 8
+        if self.sel:  # seçili aralık arka planı
+            x0, x1 = self._x(self.sel[0]), self._x(self.sel[1])
+            sel_bg = QColor(c["accent"])
+            sel_bg.setAlpha(40)
+            p.setBrush(sel_bg)
+            p.drawRect(QRectF(x0, r.top(), x1 - x0, r.height()))
+        step = self.BAR + self.GAP
+        n_cols = int(self.width() / step)
+        rate = PeaksWorker.RATE
+        base, accent = QColor(c["faint"]), QColor(c["accent"])
+        played = QColor(c["muted"])
+        cols = []
+        for i in range(n_cols):
+            t0, t1 = self._t(i * step), self._t((i + 1) * step)
+            a, b = int(t0 * rate), max(int(t0 * rate) + 1, int(t1 * rate))
+            seg = self._env[a:b]
+            cols.append((t0, t1, float(seg.mean()) if len(seg) else 0.0))
+        top = max(1e-4, float(np.percentile([v for _, _, v in cols], 98))) if cols else 1.0
+        for i, (t0, t1, v) in enumerate(cols):
+            amp = min(1.0, (v / top) ** 0.8)
+            h = max(2.0, amp * half * 2)
+            tm = (t0 + t1) / 2
+            if self.sel and self.sel[0] <= tm <= self.sel[1]:
+                p.setBrush(accent)
+            else:
+                p.setBrush(played if tm <= self.pos_s else base)
+            p.drawRoundedRect(QRectF(i * step, mid - h / 2, self.BAR, h), 1, 1)
+        if self.sel:  # seçim kenar tutamaçları
+            p.setBrush(accent)
+            for t in self.sel:
+                x = self._x(t)
+                p.drawRect(QRectF(x - 1, r.top(), 2, r.height()))
+                p.drawEllipse(QRectF(x - 4, r.top() - 3, 8, 8))
+        # oynatma imleci
+        x = self._x(self.pos_s)
+        if 0 <= x <= self.width():
+            p.setBrush(QColor(c["red"]))
+            p.drawRect(QRectF(x - 1, r.top(), 2, r.height()))
+        # zaman etiketleri
+        p.setPen(QColor(c["faint"]))
+        span = self.v1 - self.v0
+        stepl = next(s for s in (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800) if span / s <= 8)
+        t = math.ceil(self.v0 / stepl) * stepl
+        while t <= self.v1:
+            xx = min(max(self._x(t), 30), self.width() - 30)  # kenardaki etiketler kesilmesin
+            p.drawText(QRectF(xx - 30, r.bottom() + 3, 60, 16), Qt.AlignmentFlag.AlignHCenter, fmt_time(t))
+            t += stepl
+        if self._hover is not None and self._press is None:
+            p.setPen(QColor(c["muted"]))
+            p.drawLine(QPointF(self._hover, r.top()), QPointF(self._hover, r.bottom()))
+
+    def mousePressEvent(self, e):
+        if self.peaks is None:
+            return
+        self._press = e.position().x()
+
+    def mouseMoveEvent(self, e):
+        x = e.position().x()
+        self._hover = x
+        if self._press is not None and abs(x - self._press) > 3:
+            a, b = sorted((self._t(self._press), self._t(x)))
+            self.sel = (a, b)
+            self.selection_changed.emit(self.sel)
+        self.update()
+
+    def mouseReleaseEvent(self, e):
+        if self._press is None:
+            return
+        x = e.position().x()
+        if abs(x - self._press) <= 3:  # tıklama: oraya git
+            self.seek.emit(self._t(x))
+        elif self.sel and self.sel[1] - self.sel[0] < 0.2:  # çok kısa seçim yok sayılır
+            self.set_selection(None)
+        self._press = None
+        self.update()
+
+    def mouseDoubleClickEvent(self, e):
+        self.set_selection(None)
+
+    def leaveEvent(self, e):
+        self._hover = None
+        self.update()
+
+    def wheelEvent(self, e):
+        if self.peaks is None:
+            return
+        dy = e.angleDelta().y() or e.angleDelta().x()
+        span = self.v1 - self.v0
+        if e.modifiers() & Qt.KeyboardModifier.ShiftModifier or e.angleDelta().x():
+            shift = -dy / 120 * span * 0.15  # kaydır
+            self.v0 = min(max(0.0, self.v0 + shift), max(0.0, self.duration - span))
+            self.v1 = self.v0 + span
+        else:  # imlecin olduğu yere doğru yakınlaştır / uzaklaştır
+            anchor = self._t(e.position().x())
+            f = 0.8 if dy > 0 else 1.25
+            new = min(self.duration, max(2.0, span * f))
+            frac = (anchor - self.v0) / max(span, 1e-9)
+            self.v0 = min(max(0.0, anchor - frac * new), max(0.0, self.duration - new))
+            self.v1 = self.v0 + new
+        self.update()
