@@ -442,8 +442,11 @@ class Options(QWidget):
 
 
 class ItemRow(QFrame):
-    """Kenar çubuğunda bir öğe: başlık, tarih · süre, sağda durum."""
+    """Kenar çubuğunda bir öğe: başlık, tarih · süre, sağda durum.
+    Çift tık / sağ tık › Yeniden adlandır; sağ tık › Sil."""
     clicked = pyqtSignal()
+    rename_requested = pyqtSignal()
+    delete_requested = pyqtSignal()
 
     def __init__(self, item):
         super().__init__(objectName="row")
@@ -468,7 +471,22 @@ class ItemRow(QFrame):
         self.refresh()
 
     def mousePressEvent(self, e):
-        self.clicked.emit()
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+
+    def mouseDoubleClickEvent(self, e):
+        self.rename_requested.emit()
+
+    def contextMenuEvent(self, e):
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        a_ren = menu.addAction("✎   " + tr("rename"))
+        a_del = menu.addAction(tr("delete") if self.item.kind == "rec" and not self.item.saved else tr("remove"))
+        chosen = menu.exec(e.globalPos())
+        if chosen is a_ren:
+            self.rename_requested.emit()
+        elif chosen is a_del:
+            self.delete_requested.emit()
 
     def set_selected(self, on):
         self.setProperty("selected", "true" if on else "false")

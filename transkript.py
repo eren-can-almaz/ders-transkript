@@ -323,6 +323,8 @@ class MainWindow(QMainWindow):
     def _add_row(self, it, top=True):
         row = ItemRow(it)
         row.clicked.connect(lambda: self.select(it))
+        row.rename_requested.connect(lambda: self._rename_item(it))
+        row.delete_requested.connect(lambda: (self.select(it), self._view(it)[1].delete()))
         self.rows[it.id] = row
         if top:
             self.list.insertWidget(0, row)
@@ -357,6 +359,11 @@ class MainWindow(QMainWindow):
             return
         area, _ = self._view(it)
         self.stack.setCurrentWidget(area)
+
+    def _rename_item(self, it):
+        """Listeden 'Yeniden adlandır': sayfayı aç, başlığı düzenlemeye hazırla."""
+        self.select(it)
+        self._view(it)[1].start_rename()
 
     def _recording_view(self):
         return next((v for _, v in self.views.values() if v.recording()), None)
@@ -400,8 +407,6 @@ class MainWindow(QMainWindow):
             self.select(last)
 
     def _on_closed(self, it):
-        if it.new and it.title == tr("rec_title", n=self.lib.rec_counter):
-            self.lib.rec_counter -= 1  # başlatılmadan silinen son kaydın numarası boşa gitmesin
         row = self.rows.pop(it.id, None)
         if row:
             row.setParent(None)

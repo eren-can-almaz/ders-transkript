@@ -63,7 +63,13 @@ class ItemView(QWidget):
         head.setSpacing(8)
         self.title = QLineEdit(item.title, objectName="titleEdit")
         self.title.editingFinished.connect(self._rename)
-        head.addWidget(self.title, 1)
+        self.title.textChanged.connect(self._fit_title)
+        head.addWidget(self.title)
+        self.rename_btn = QPushButton("✎", objectName="closePage")
+        self.rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rename_btn.clicked.connect(self.start_rename)
+        head.addWidget(self.rename_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        head.addStretch()
         self.reveal_btn = QPushButton(objectName="plain")
         self.reveal_btn.clicked.connect(self._reveal)
         self.save_btn = QPushButton(objectName="primary")
@@ -301,7 +307,9 @@ class ItemView(QWidget):
             self.tr_btn.setEnabled(not self.file_worker.cancelled)
         self.tr_btn.setObjectName("destructive" if self.file_worker else "primary")
         repolish(self.tr_btn)
+        self._fit_title()
         self.title.setReadOnly(self.recording())
+        self.rename_btn.setVisible(not self.recording())
         self._render_meta()
 
     def _render_meta(self):
@@ -333,6 +341,8 @@ class ItemView(QWidget):
     def retranslate(self):
         self.save_btn.setText(tr("save"))
         self.close_btn.setToolTip(tr("close_page"))
+        self.rename_btn.setToolTip(tr("rename"))
+        self.title.setToolTip(tr("rename_tip"))
         self.wave_hint.setText(tr("wave_hint"))
         self.sel_play.setText("▶  " + tr("sel_play"))
         self.sel_tr.setText(tr("sel_transcribe"))
@@ -639,15 +649,36 @@ class ItemView(QWidget):
             except OSError:
                 pass
 
+    def _fit_title(self, *_):
+        fm = self.title.fontMetrics()
+        self.title.setFixedWidth(min(560, max(120, fm.horizontalAdvance(self.title.text() + "  ") + 24)))
+
+    def start_rename(self):
+        if self.recording():
+            return
+        self.title.setFocus()
+        self.title.selectAll()
+
     def _rename(self):
         name = self.title.text().strip()
-        if not name:
+        if not name or name == self.item.title:
             self.title.setText(self.item.title)
             return
-        if name != self.item.title:
-            self.item.title = name
-            self.lib.save_index()
-            self.row_refresh.emit()
+        try:
+            self.player.release()  # kaydedilmiş dosya yeniden adlandırılacaksa önce bırak
+            self.lib.rename(self.item, name)
+        except FileExistsError as e:
+            QMessageBox.warning(self, tr("rename"), tr("rename_exists", path=e.args[0]))
+            self.title.setText(self.item.title)
+            return
+        except OSError as e:
+            QMessageBox.warning(self, tr("rename"), str(e))
+            self.title.setText(self.item.title)
+            return
+        self.player.path = None  # dosya yolu değişmiş olabilir: oynatıcı yeniden yüklensin
+        self.row_refresh.emit()
+        self._layout_state()
+        self.title.clearFocus()
 
     def _reveal(self):
         if self.item.audio:

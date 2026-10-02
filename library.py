@@ -65,7 +65,6 @@ class Library:
     def __init__(self):
         self.path = user_data_dir() / "library.json"
         self.items = []
-        self.rec_counter = 0
         self._load()
 
     # --- kalıcılık ------------------------------------------------------
@@ -74,7 +73,6 @@ class Library:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = {}
-        self.rec_counter = int(data.get("rec_counter", 0))
         for d in data.get("items", []):
             try:
                 it = Item.from_json(d)
@@ -87,8 +85,8 @@ class Library:
         known = {it.audio for it in self.items if it.audio}
         for p in sorted(unsaved_dir().iterdir()):
             if p.suffix in AUDIO_SUFFIXES and p not in known:
-                it = Item("rec", self.next_rec_title(), p, datetime.fromtimestamp(p.stat().st_mtime),
-                          probe_audio(str(p))[0])
+                when = datetime.fromtimestamp(p.stat().st_mtime)
+                it = Item("rec", self.next_rec_title(when), p, when, probe_audio(str(p))[0])
                 old_txt = p.with_suffix(".txt")
                 if old_txt.exists():
                     it.text = old_txt.read_text(encoding="utf-8")
@@ -99,8 +97,7 @@ class Library:
         self.save_index()
 
     def save_index(self):
-        data = {"rec_counter": self.rec_counter,
-                "items": [it.to_json() for it in self.items if not it.new]}
+        data = {"items": [it.to_json() for it in self.items if not it.new]}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(self.path)
@@ -112,10 +109,43 @@ class Library:
             it.text_path.unlink()
 
     # --- öğeler ---------------------------------------------------------
-    def next_rec_title(self):
-        from i18n import tr
-        self.rec_counter += 1
-        return tr("rec_title", n=self.rec_counter)
+    def next_rec_title(self, when=None):
+        """Gün bazlı numara: 'Kayıt N', N = o günün kayıtlarındaki en büyük numara + 1.
+
+        Yalnızca aynı günün kayıtlarına bakılır; eski günlerin kayıtları numarayı etkilemez.
+        Adı elle değiştirilmiş kayıtlar sayılmaz. Her arayüz dilindeki kalıp ('Kayıt 3',
+        'Recording 3', 'Aufnahme 3') tanınır.
+        """
+        import re
+        from i18n import STRINGS, tr
+        day = (when or datetime.now()).date()
+        patterns = [re.compile("^" + re.escape(lang["rec_title"]).replace(re.escape("{n}"), r"(\d+)") + "$")
+                    for lang in STRINGS.values()]
+        used = [0]
+        for it in self.items:
+            if it.kind == "rec" and it.created.date() == day:
+                for pat in patterns:
+                    m = pat.match(it.title)
+                    if m:
+                        used.append(int(m.group(1)))
+        return tr("rec_title", n=max(used) + 1)
+
+    def rename(self, it, name):
+        """Adı değiştir. Kaydedilmiş kayıtta diskteki ses (ve .txt) dosyası da yeniden adlandırılır;
+        eklenen ses dosyalarının (kullanıcının kendi dosyaları) diskteki adına dokunulmaz."""
+        if it.kind == "rec" and it.saved and it.audio and it.audio.exists():
+            safe = "".join(ch for ch in name if ch not in '\\/:*?"<>|').strip()
+            if safe and safe != it.audio.stem:
+                dest = it.audio.with_name(safe + it.audio.suffix)
+                if dest.exists():
+                    raise FileExistsError(str(dest))
+                old_txt = it.audio.with_suffix(".txt")
+                it.audio.rename(dest)
+                if old_txt.exists():
+                    old_txt.rename(dest.with_suffix(".txt"))
+                it.audio = dest
+        it.title = name
+        self.save_index()
 
     def add(self, it):
         self.items.insert(0, it)
