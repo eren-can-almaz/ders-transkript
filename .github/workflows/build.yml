@@ -24,8 +24,11 @@ jobs:
           for f in config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin; do
             curl -sfL -o models/large-v3-turbo/$f https://huggingface.co/mobiuslabsgmbh/faster-whisper-large-v3-turbo/resolve/main/$f
           done
-          for f in config.json tokenizer.json vocabulary.txt model.bin; do
-            curl -sfL -o models/small/$f https://huggingface.co/Systran/faster-whisper-small/resolve/main/$f
+          for m in small base tiny; do  # small: Standart kalite; base/tiny: canlı önizleme
+            mkdir -p models/$m
+            for f in config.json tokenizer.json vocabulary.txt model.bin; do
+              curl -sfL -o models/$m/$f https://huggingface.co/Systran/faster-whisper-$m/resolve/main/$f
+            done
           done
 
       - run: pyinstaller --noconfirm DersTranskript.spec

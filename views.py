@@ -31,6 +31,7 @@ STEPS = ["step_model", "step_read", "step_transcribe"]
 class ItemView(QWidget):
     row_status = pyqtSignal(str, str)   # (metin, tür) — kenar çubuğu rozeti
     row_refresh = pyqtSignal()          # başlık / süre değişti
+    add_audio = pyqtSignal(str)         # (gelişmiş) işlenmiş sesi listeye ekle
     closed = pyqtSignal(object)         # öğe listeden kalktı
     LAG_WARN = 25.0
 
@@ -141,6 +142,10 @@ class ItemView(QWidget):
         self.tr_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tr_btn.clicked.connect(self.transcribe)
         tl.addWidget(self.tr_btn)
+        self.an_btn = QPushButton(objectName="tinted")
+        self.an_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.an_btn.clicked.connect(self.open_analysis)
+        tl.addWidget(self.an_btn)
         tl.addStretch()
         lay.addWidget(self.tr_row)
 
@@ -227,6 +232,7 @@ class ItemView(QWidget):
         if session and self.rec_state != "new":
             self.opt_panel.hide()
         self.tr_btn.setVisible(has_audio)
+        self.an_btn.setVisible(has_audio and self.settings.value("adv/enabled", False, type=bool))
         if has_audio and self.player.path != it.audio:
             self.player.set_source(it.audio, it.duration)
         live_on = session and self.live_text.isChecked()
@@ -278,6 +284,7 @@ class ItemView(QWidget):
 
     def retranslate(self):
         self.save_btn.setText(tr("save"))
+        self.an_btn.setText(tr("analysis"))
         self.reveal_btn.setText(tr("show_in_folder"))
         self.mic_label.setText(tr("mic"))
         if not self._devices:
@@ -366,8 +373,7 @@ class ItemView(QWidget):
         base = unsaved_dir() / self.item.id
         w = self.live_worker = LiveWorker(
             self.opts.model_name(), self.opts.language(), self.opts.timestamps(), self.opts.threads(),
-            record_base=base, transcribe=live, preview=True,
-            draft_interval=1.5 if self.opts.is_quiet() else 1.0)
+            record_base=base, transcribe=live, preview=True, tuning=self.live_tuning())
         w.ready.connect(lambda: self._set_rec_state("recording") if self.rec_state == "loading" else None)
         w.segment.connect(self.box.append)
         w.draft.connect(self.box.set_draft)
@@ -392,6 +398,13 @@ class ItemView(QWidget):
         self._set_rec_state("loading" if live else "recording")
         self.ticker.start(200)
         w.start()
+
+    def live_tuning(self):
+        """Ayarlar › Gelişmiş'teki canlı kayıt değerleri (gelişmiş mod kapalıysa varsayılanlar)."""
+        from core import LIVE_DEFAULTS
+        if not self.settings.value("adv/enabled", False, type=bool):
+            return dict(LIVE_DEFAULTS)
+        return {k: type(v)(self.settings.value(f"adv/{k}", v)) for k, v in LIVE_DEFAULTS.items()}
 
     def toggle_pause(self):
         if self.rec_state not in ("recording", "paused", "loading"):
@@ -630,6 +643,15 @@ class ItemView(QWidget):
             self.file_worker.wait(3000)
         self._store_text()
         self.player.release()
+
+    def open_analysis(self):
+        """Gelişmiş: spektrogram / gürültü ayıklama / yeniden sentez penceresi."""
+        from analysis import AnalysisWindow
+        self.player.pause()
+        win = AnalysisWindow(self.item, self.window())
+        win.add_to_list.connect(self.add_audio)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        win.show()
 
     def refresh_icons(self):
         self._render_rec()

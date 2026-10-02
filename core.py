@@ -319,6 +319,19 @@ class RecordingWriter:
         self._out.close()
 
 
+# Canlı kaydın ayarlanabilir değerleri (Ayarlar › Gelişmiş). "Varsayılanlar" bunlara döner.
+LIVE_DEFAULTS = {
+    "draft_model": "base",   # önizleme modeli: tiny (en hızlı) / base / small (en doğru)
+    "draft_threads": 4,      # önizleme iş parçacığı
+    "draft_interval": 0.7,   # sn; önizleme yenileme aralığı
+    "silence_tail": 0.5,     # sn; metni kesinleştiren duraklama
+    "min_chunk": 2.0,        # sn; kesinleştirilen en kısa parça
+    "max_chunk": 10.0,       # sn; konuşma durmasa da en geç bu uzunlukta kesinleştir
+    "beam": 3,               # kesin metin arama genişliği (1 = en hızlı)
+}
+DRAFT_MODELS = ["tiny", "base", "small"]
+
+
 class LiveWorker(QThread):
     """Mikrofon sesini kaydeder ve/veya canlı metne çevirir.
 
@@ -330,12 +343,7 @@ class LiveWorker(QThread):
     Whisper her çağrıda 30 sn'lik pencereyi işlediği için çağrı süresi ses uzunluğundan büyük
     ölçüde bağımsızdır; önizlemenin hızlı modelle yapılmasının nedeni budur.
     """
-    MIN_CHUNK = 2.0      # sn; bundan kısa parçalar duraklama olsa da beklenir
-    MAX_CHUNK = 10.0     # sn; konuşma hiç durmazsa en geç bu uzunlukta kesilir
-    SILENCE_TAIL = 0.5   # sn; parçayı bitiren duraklama
     FRAME = 320          # 20 ms
-    DRAFT_MODEL = "small"
-    DRAFT_THREADS = 2
     DRAFT_MAX = 25       # sn; önizlemeye verilen en uzun ses
 
     ready = pyqtSignal()
@@ -347,8 +355,16 @@ class LiveWorker(QThread):
     failed = pyqtSignal(str)
 
     def __init__(self, model_name, language, timestamps, threads, record_base=None,
-                 transcribe=True, preview=True, draft_interval=1.0):
+                 transcribe=True, preview=True, tuning=None):
         super().__init__()
+        t = dict(LIVE_DEFAULTS, **(tuning or {}))  # gelişmiş ayarlar (bkz. LIVE_DEFAULTS)
+        self.DRAFT_MODEL = t["draft_model"]
+        self.DRAFT_THREADS = int(t["draft_threads"])
+        self.MIN_CHUNK = float(t["min_chunk"])
+        self.MAX_CHUNK = float(t["max_chunk"])
+        self.SILENCE_TAIL = float(t["silence_tail"])
+        self.BEAM = int(t["beam"])
+        draft_interval = float(t["draft_interval"])
         self.model_name = model_name
         self.language = language
         self.timestamps = timestamps
@@ -496,7 +512,7 @@ class LiveWorker(QThread):
 
     def _transcribe(self, model, chunk, offset, last_end):
         segments, info = model.transcribe(
-            chunk, language=self._lang, beam_size=3, vad_filter=True,
+            chunk, language=self._lang, beam_size=self.BEAM, vad_filter=True,
             condition_on_previous_text=False,
             initial_prompt=self.text_tail[-200:] or None,  # önceki metin: süreklilik ve yazım tutarlılığı
         )

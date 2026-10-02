@@ -12,7 +12,8 @@ from pathlib import Path
 from PyQt6.QtCore import QSettings, QSize, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
+    QHBoxLayout, QLabel, QSpinBox,
     QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -110,6 +111,49 @@ class SettingsDialog(QDialog):
         lay.addLayout(grid)
         self.offline = QLabel(objectName="faint")
         lay.addWidget(self.offline)
+
+        # ---- gelişmiş
+        sep = QFrame(objectName="sep")
+        lay.addWidget(sep)
+        self.adv = QCheckBox(objectName="switch")
+        self.adv.setChecked(win.settings.value("adv/enabled", False, type=bool))
+        self.adv.toggled.connect(self._on_adv)
+        lay.addWidget(self.adv)
+        self.adv_hint = QLabel(objectName="faint")
+        self.adv_hint.setWordWrap(True)
+        lay.addWidget(self.adv_hint)
+        self.adv_box = QWidget()
+        ab = QGridLayout(self.adv_box)
+        ab.setContentsMargins(0, 4, 0, 0)
+        ab.setHorizontalSpacing(16)
+        ab.setVerticalSpacing(10)
+        self.adv_head = QLabel(objectName="sectionTitle")
+        ab.addWidget(self.adv_head, 0, 0, 1, 2)
+        self.draft_model = QComboBox()
+        self.f_interval = QDoubleSpinBox(minimum=0.3, maximum=3.0, singleStep=0.1, decimals=1)
+        self.f_threads = QSpinBox(minimum=1, maximum=max(1, os.cpu_count() or 4))
+        self.f_silence = QDoubleSpinBox(minimum=0.2, maximum=1.5, singleStep=0.1, decimals=1)
+        self.f_min = QDoubleSpinBox(minimum=1.0, maximum=5.0, singleStep=0.5, decimals=1)
+        self.f_max = QDoubleSpinBox(minimum=4.0, maximum=20.0, singleStep=1.0, decimals=0)
+        self.f_beam = QSpinBox(minimum=1, maximum=5)
+        self.adv_fields = [("draft_model", self.draft_model), ("draft_interval", self.f_interval),
+                           ("draft_threads", self.f_threads), ("silence_tail", self.f_silence),
+                           ("min_chunk", self.f_min), ("max_chunk", self.f_max), ("beam", self.f_beam)]
+        self.adv_labels = {}
+        for r, (key, w) in enumerate(self.adv_fields, start=1):
+            lbl = QLabel(objectName="muted")
+            self.adv_labels[key] = lbl
+            ab.addWidget(lbl, r, 0)
+            ab.addWidget(w, r, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.defaults_btn = QPushButton(objectName="tinted")
+        self.defaults_btn.clicked.connect(self._defaults)
+        ab.addWidget(self.defaults_btn, len(self.adv_fields) + 1, 0, 1, 2, alignment=Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.adv_box)
+        self._load_adv()
+        for key, w in self.adv_fields:
+            sig = w.currentIndexChanged if isinstance(w, QComboBox) else w.valueChanged
+            sig.connect(self._store_adv)
+        self.adv_box.setVisible(self.adv.isChecked())
         row = QHBoxLayout()
         row.addStretch()
         self.close_btn = QPushButton(objectName="primary")
@@ -117,6 +161,37 @@ class SettingsDialog(QDialog):
         row.addWidget(self.close_btn)
         lay.addLayout(row)
         self.retranslate()
+
+    def _load_adv(self):
+        from core import LIVE_DEFAULTS
+        st = self.win.settings
+        self._loading = True
+        for key, w in self.adv_fields:
+            v = st.value(f"adv/{key}", LIVE_DEFAULTS[key])
+            if isinstance(w, QComboBox):
+                w.setCurrentIndex(max(0, w.findData(v)))
+            else:
+                w.setValue(type(LIVE_DEFAULTS[key])(v))
+        self._loading = False
+
+    def _store_adv(self, *_):
+        if getattr(self, "_loading", False):
+            return
+        for key, w in self.adv_fields:
+            self.win.settings.setValue(f"adv/{key}", w.currentData() if isinstance(w, QComboBox) else w.value())
+
+    def _defaults(self):
+        """Tek tıkla tüm gelişmiş değerleri varsayılana döndür."""
+        from core import LIVE_DEFAULTS
+        for key, v in LIVE_DEFAULTS.items():
+            self.win.settings.setValue(f"adv/{key}", v)
+        self._load_adv()
+
+    def _on_adv(self, on):
+        self.win.settings.setValue("adv/enabled", on)
+        self.adv_box.setVisible(on)
+        self.adjustSize()
+        self.win.advanced_changed()
 
     def _choose(self):
         d = QFileDialog.getExistingDirectory(self, tr("folder_dialog"), str(self.win.folder))
@@ -143,6 +218,23 @@ class SettingsDialog(QDialog):
         self.open.setText(tr("open"))
         self.offline.setText("●  " + tr("offline"))
         self.close_btn.setText(tr("close"))
+        self.adv.setText(tr("adv_enable"))
+        self.adv_hint.setText(tr("adv_hint"))
+        self.adv_head.setText(tr("adv_live"))
+        cur = self.draft_model.currentData()
+        self._loading = True
+        self.draft_model.clear()
+        for m in ("tiny", "base", "small"):
+            self.draft_model.addItem(tr(f"dm_{m}"), m)
+        self._loading = False
+        self._load_adv() if cur is None else self.draft_model.setCurrentIndex(max(0, self.draft_model.findData(cur)))
+        for key, k in [("draft_model", "adv_draft_model"), ("draft_interval", "adv_interval"),
+                       ("draft_threads", "adv_threads"), ("silence_tail", "adv_silence"),
+                       ("min_chunk", "adv_min_chunk"), ("max_chunk", "adv_max_chunk"), ("beam", "adv_beam")]:
+            self.adv_labels[key].setText(tr(k))
+        for w in (self.f_interval, self.f_silence, self.f_min, self.f_max):
+            w.setSuffix(tr("unit_s"))
+        self.defaults_btn.setText("↺  " + tr("adv_defaults"))
 
 
 class MainWindow(QMainWindow):
@@ -242,6 +334,7 @@ class MainWindow(QMainWindow):
             v.row_status.connect(lambda text, kind, it=it: self.rows[it.id].set_status(text, kind))
             v.row_refresh.connect(lambda it=it: self.rows[it.id].refresh())
             v.closed.connect(self._on_closed)
+            v.add_audio.connect(lambda p: self.add_files([p]))
             area = QScrollArea()
             area.setWidgetResizable(True)
             area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -361,6 +454,10 @@ class MainWindow(QMainWindow):
         for row in self.rows.values():
             row.refresh()
         self.update()
+
+    def advanced_changed(self):
+        for _, v in self.views.values():
+            v._layout_state()
 
     def set_ui_lang(self, code):
         i18n.set_lang(code)

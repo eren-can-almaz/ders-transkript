@@ -113,6 +113,14 @@ QComboBox QAbstractItemView {{
     background: {bg}; border: 1px solid {sep}; border-radius: 8px; padding: 4px; outline: none;
     selection-background-color: {accent}; selection-color: {on_accent};
 }}
+QAbstractSpinBox {{
+    background: {fill}; border: none; border-radius: 8px; padding: 5px 8px; min-width: 84px;
+    selection-background-color: {selection};
+}}
+QAbstractSpinBox:hover {{ background: {fill2}; }}
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ width: 16px; border: none; background: transparent; }}
+QAbstractSpinBox::up-arrow {{ image: url({UP_PNG}); width: 9px; height: 9px; }}
+QAbstractSpinBox::down-arrow {{ image: url({ARROW_PNG}); width: 9px; height: 9px; }}
 QCheckBox {{ spacing: 8px; }}
 QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid {disabled}; background: {bg}; }}
 QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; image: url({CHECK_PNG}); }}
@@ -186,6 +194,7 @@ def _make_assets(theme):
 
     return {
         "ARROW_PNG": line("arrow", c["muted"], [(5, 8), (10, 13), (15, 8)], 2.2),
+        "UP_PNG": line("up", c["muted"], [(5, 12), (10, 7), (15, 12)], 2.2),
         "CHECK_PNG": line("check", c["on_accent"], [(4.5, 10.5), (8.5, 14.5), (15.5, 6)], 2.6),
         "SWITCH_OFF": switch("switch_off", c["fill2"], False),
         "SWITCH_ON": switch("switch_on", c["green"], True),
