@@ -53,7 +53,10 @@ jobs:
       - name: Sürüm numarası (v1.2 etiketi -> "1.2"; elle başlatılan denemede "dev")
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
-        run: sed -i.bak 's/^VERSION = .*/VERSION = "${GITHUB_REF_NAME#v}"/' version.py && cat version.py
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          sed -i.bak "s/^VERSION = .*/VERSION = \"$v\"/" version.py
+          python -c "import version, updates; assert version.VERSION == '$v' and updates.parse('$v'), version.VERSION; print('sürüm', version.VERSION)"
 
       - run: pyinstaller --noconfirm DersTranskript.spec
 
