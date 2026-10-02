@@ -593,7 +593,7 @@ class ItemView(QWidget):
         self._backup_text = self.item.text
         self.box.set_text("")
         self._set_note("")
-        self._t_start = time.time()
+        self._t_start = time.monotonic()
         self._t_upd = self._eta = None
         self.prog.show()
         self.prog_ring.reset()
@@ -611,7 +611,7 @@ class ItemView(QWidget):
         if i == 2:
             self.bar.setRange(0, 1000)
             self.bar.setValue(0)
-            self._t_tr = time.time()
+            self._t_tr = time.monotonic()
         self.row_status.emit("…", "busy")
 
     def _on_progress(self, done, total):
@@ -620,10 +620,10 @@ class ItemView(QWidget):
         self.prog_ring.set_value(frac)
         self.row_status.emit(f"%{int(frac * 100)}", "busy")
         self._prog_audio = tr("progress_fmt", done=fmt_time(done), total=fmt_time(total))
-        elapsed = time.time() - self._t_tr
+        elapsed = time.monotonic() - self._t_tr
         if frac > 0.03 and elapsed > 5:
             self._eta = elapsed / frac - elapsed
-            self._t_upd = time.time()
+            self._t_upd = time.monotonic()
         self._tick_file()
 
     def _tick_file(self):
@@ -632,7 +632,7 @@ class ItemView(QWidget):
         if self._eta is None:
             eta = tr("eta_calc")
         else:
-            eta = tr("eta_fmt", t=fmt_time(max(0.0, self._eta - (time.time() - self._t_upd))))
+            eta = tr("eta_fmt", t=fmt_time(max(0.0, self._eta - (time.monotonic() - self._t_upd))))
         self.prog_info.setText(f"{getattr(self, '_prog_audio', '')}   ·   {eta}")
 
     def _on_tr_done(self, elapsed):

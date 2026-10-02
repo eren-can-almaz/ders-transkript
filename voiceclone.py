@@ -7,6 +7,8 @@ PyTorch gerekmez. Model dosyaları (~1,55 GB, 4-bit dil modeli) ilk kullanımda 
 kullanıcı veri klasöründeki plugins/ altında kalır (oturum temizliğinden etkilenmez).
 """
 import re
+import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -125,10 +127,24 @@ def best_reference(audio, sr, seconds=10.0):
     return audio[start:start + n]
 
 
+def _ticker(progress, lo, hi, expected_sec):
+    """Kendi ilerlemesini bildiremeyen uzun bir adım sürerken yüzdeyi süre tahminiyle ilerlet
+    (en fazla %97'ye; adım bitince gerçek değer gelir). Döner: durdurma olayı."""
+    stop = threading.Event()
+    t0 = time.monotonic()
+
+    def run():
+        while not stop.wait(0.25):
+            f = min(0.97, (time.monotonic() - t0) / max(expected_sec, 0.1))
+            progress(lo + (hi - lo) * f)
+    threading.Thread(target=run, daemon=True).start()
+    return stop
+
+
 class VoiceClone:
     """Chatterbox ONNX çıkarımı. `reference`: 24 kHz mono float32 konuşmacı örneği."""
 
-    def __init__(self, threads=4):
+    def __init__(self, threads=4, progress=None):
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
@@ -136,11 +152,25 @@ class VoiceClone:
         so = ort.SessionOptions()
         so.intra_op_num_threads = threads
         so.inter_op_num_threads = 1
+        so.log_severity_level = 3  # kod çözücünün zararsız grafik uyarılarını gösterme
         mk = lambda f: ort.InferenceSession(str(d / "onnx" / f), so, providers=["CPUExecutionProvider"])
+        progress = progress or (lambda f: None)
+        t = time.monotonic()
         self.enc = mk("speech_encoder.onnx")
+        enc_sec = time.monotonic() - t
+        progress(0.03)
         self.emb = mk("embed_tokens.onnx")
         self.lm = mk("language_model_q4.onnx")
-        self.dec = mk("conditional_decoder.onnx")
+        progress(0.05)
+        # Ses kod çözücünün yüklenmesi (grafiği çok büyük) sürenin ~%95'i ve ilerleme bildirmez:
+        # süresini kodlayıcının yüklenme süresinden tahmin et (bu bilgisayarda ~35 katı)
+        stop = _ticker(progress, 0.05, 1.0, max(5.0, 35 * enc_sec))
+        try:
+            self.dec = mk("conditional_decoder.onnx")
+        finally:
+            stop.set()
+        progress(1.0)
+        self._dec_per_tok = None  # kod çözme süresi / belirteç (ilk cümleden sonra öğrenilir)
         self.tok = Tokenizer.from_file(str(d / "tokenizer.json"))
         self._spk = None
 
@@ -149,7 +179,7 @@ class VoiceClone:
             None, {"audio_values": reference[np.newaxis, :].astype(np.float32)})
         self._spk = (cond_emb, prompt_token, x_vector, prompt_feat)
 
-    def _tokens(self, text, lang, exaggeration, max_new, cancel):
+    def _tokens(self, text, lang, exaggeration, max_new, cancel, on_token=None):
         cond_emb, _, _, _ = self._spk
         ids = np.array([self.tok.encode(f"[{lang}]{_norm_text(text, lang)}").ids], dtype=np.int64)
         pos = np.where(ids >= START, 0, np.arange(ids.shape[1])[np.newaxis, :] - 1)
@@ -157,6 +187,7 @@ class VoiceClone:
                 "exaggeration": np.array([exaggeration], dtype=np.float32)}
         out = np.array([[START]], dtype=np.int64)
         past = attn = None
+        self._lm_t0 = time.monotonic()
         for i in range(max_new):
             if cancel():
                 return None
@@ -175,11 +206,14 @@ class VoiceClone:
             out = np.concatenate((out, nxt), axis=-1)
             if int(nxt[0, 0]) == STOP:
                 break
+            if on_token and i % 8 == 0:
+                on_token(i)
             feed["input_ids"] = nxt
             feed["position_ids"] = np.full((1, 1), i + 1, dtype=np.int64)
             attn = np.concatenate([attn, np.ones((1, 1), dtype=np.int64)], axis=1)
             for j, k in enumerate(past):
                 past[k] = present[j]
+        self._lm_per_tok = (time.monotonic() - self._lm_t0) / max(1, out.shape[1])
         return out[:, 1:-1] if int(out[0, -1]) == STOP else out[:, 1:]
 
     def synthesize(self, text, lang="tr", exaggeration=0.5, progress=None, cancel=lambda: False):
@@ -193,16 +227,27 @@ class VoiceClone:
         gap = np.zeros(int(0.18 * SR), np.float32)
         for k, s in enumerate(sents):
             # cümle uzunluğuna göre belirteç sınırı (Türkçe ~14 harf/sn; pay bırakılır)
-            max_new = int(min(1000, max(60, len(s) / 14 * TOKENS_PER_SEC * 1.6)))
-            toks = self._tokens(s, lang, exaggeration, max_new, cancel)
+            expected = max(30, len(s) / 14 * TOKENS_PER_SEC)
+            max_new = int(min(1000, max(60, expected * 1.6)))
+            n = len(sents)
+            prog = progress or (lambda f: None)
+            # cümle k: belirteç üretimi [k, k+0.4], kod çözme [k+0.4, k+1] (n'e bölünür)
+            tick = lambda i, k=k, e=expected: prog((k + 0.4 * min(0.95, i / e)) / n)
+            toks = self._tokens(s, lang, exaggeration, max_new, cancel, on_token=tick)
             if toks is None:
                 return None
             toks = np.concatenate([prompt_token, toks], axis=1)
-            wav = self.dec.run(None, {"speech_tokens": toks, "speaker_embeddings": x_vector,
-                                      "speaker_features": prompt_feat})[0]
+            per_tok = self._dec_per_tok or 3.0 * self._lm_per_tok  # ilk cümlede tahmin, sonra ölçüm
+            stop = _ticker(prog, (k + 0.4) / n, (k + 1) / n, per_tok * toks.shape[1])
+            t = time.monotonic()
+            try:
+                wav = self.dec.run(None, {"speech_tokens": toks, "speaker_embeddings": x_vector,
+                                          "speaker_features": prompt_feat})[0]
+            finally:
+                stop.set()
+            self._dec_per_tok = (time.monotonic() - t) / toks.shape[1]
             pieces += [np.squeeze(wav, axis=0).astype(np.float32), gap]
-            if progress:
-                progress((k + 1) / len(sents))
+            prog((k + 1) / n)
         return np.concatenate(pieces) if pieces else np.zeros(0, np.float32)
 
 
@@ -213,7 +258,7 @@ class VoiceClone:
 
 def _server(req_q, resp_q, threads):
     try:
-        model = VoiceClone(threads)
+        model = VoiceClone(threads, progress=lambda f: resp_q.put(("progress", None, ("load", f))))
     except Exception as e:
         resp_q.put(("failed", None, f"{type(e).__name__}: {e}"))
         return
@@ -232,10 +277,23 @@ def _server(req_q, resp_q, threads):
             resp_q.put(("failed", job, f"{type(e).__name__}: {e}"))
 
 
+def _load_time_file():
+    return plugin_dir() / ".load_seconds"
+
+
+def expected_load_seconds():
+    """Önceki yüklemenin gerçek süresi (bu bilgisayarda); hiç yüklenmediyse ~70 sn varsay."""
+    try:
+        return max(5.0, float(_load_time_file().read_text()))
+    except (OSError, ValueError):
+        return 70.0
+
+
 class CloneServer:
     """Klonlama süreci (analiz penceresi açıkken yaşar; model bir kez yüklenir)."""
 
     def __init__(self, threads):
+        self.started_at = time.monotonic()
         import multiprocessing as mp
         ctx = mp.get_context("spawn")
         self.req, self.resp = ctx.Queue(), ctx.Queue()
@@ -272,6 +330,11 @@ def get_server(threads):
     return s
 
 
+def prewarm(threads):
+    """Kullanıcı klonlamayla ilgilenmeye başlayınca modeli arka planda yüklemeye başla (~1 dk)."""
+    get_server(threads)
+
+
 def release_model():
     """Analiz penceresi kapanınca klonlama süreci biter; bellek tamamen geri verilir."""
     s = _SERVER["s"]
@@ -299,10 +362,25 @@ class CloneWorker(QThread):
             ref24 = np.interp(np.linspace(0, len(ref) - 1, int(len(ref) * SR / 16000)),
                               np.arange(len(ref)), ref).astype(np.float32)
             srv = get_server(self.threads)
+            while True:  # ön yüklemeden kalan mesajlar: model hazır mı?
+                try:
+                    kind, _j, _p = srv.resp.get_nowait()
+                except _q.Empty:
+                    break
+                if kind == "ready":
+                    srv.ready = True
+                elif kind == "failed" and _j is None:
+                    raise RuntimeError(_p)
             CloneWorker._job += 1
             job = CloneWorker._job
-            if not srv.ready:
-                self.progress.emit(0.0, "load")
+            loading = not srv.ready
+            expected = expected_load_seconds()
+
+            def load_tick():  # model yüklenirken süreç mesaj gönderemez (GIL): yüzdeyi burada tahmin et
+                f = min(0.97, (time.monotonic() - srv.started_at) / expected)
+                self.progress.emit(0.4 * f, "load")
+            if loading:
+                load_tick()
             srv.req.put((job, ref24, self.text, self.lang))
             while True:
                 if self.cancelled:  # durdur: süreci kes (model bir sonraki üretimde yeniden yüklenir)
@@ -313,15 +391,25 @@ class CloneWorker(QThread):
                 try:
                     kind, j, payload = srv.resp.get(timeout=0.2)
                 except _q.Empty:
+                    if loading and not srv.ready:
+                        load_tick()
                     continue
                 if kind == "ready":
                     srv.ready = True
+                    try:  # gerçek yükleme süresini sonraki tahminler için sakla
+                        _load_time_file().write_text(f"{time.monotonic() - srv.started_at:.1f}")
+                    except OSError:
+                        pass
                     continue
                 if j is not None and j != job:
                     continue  # eski bir isteğin geç gelen mesajı
                 if kind == "progress":
                     stage, f = payload
-                    self.progress.emit(f, stage)
+                    if stage == "load":
+                        continue  # yükleme yüzdesi arayüz tarafında tahmin ediliyor
+                    else:
+                        total = 0.4 + 0.6 * f if loading else f
+                    self.progress.emit(total, stage)
                 elif kind == "done":
                     self.done.emit(payload)
                     return

@@ -20,6 +20,7 @@ import dsp
 from core import SR, decode_audio, decode_range, fmt_time, release_memory, user_data_dir
 from i18n import tr
 from theme import colors, glyph
+from ui_parts import RingProgress
 
 ROWS, COLS = 360, 1400  # spektrogram görüntü çözünürlüğü
 CWT_MAX_SEC = 60        # dalgacık dönüşümü ağır: bölüm üst sınırı
@@ -197,7 +198,7 @@ class ComputeWorker(QThread):
 
     def run(self):
         try:
-            t_start = time.time()
+            t_start = time.monotonic()
             w, p = self.win, self.p
             seg = decode_range(str(w.path), p["start"], p["length"])  # tüm kayıt değil, yalnız bölüm
             if len(seg) < SR // 4:
@@ -219,7 +220,7 @@ class ComputeWorker(QThread):
                     q = np.percentile(out["before"], 10)
                     m = out["before"] <= q
                     out["nr_db"] = float(np.mean(out["before"][m] - out["after_db"][m]))
-            out["ms"] = int((time.time() - t_start) * 1000)
+            out["ms"] = int((time.monotonic() - t_start) * 1000)
             self.done.emit(out)
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")
@@ -442,6 +443,9 @@ class AnalysisWindow(QWidget):
         self.add_btn = QPushButton(tr("an_to_list"), objectName="primary")
         self.export_btn.clicked.connect(lambda: self.export(to_list=False))
         self.add_btn.clicked.connect(lambda: self.export(to_list=True))
+        self.exp_ring = RingProgress(36, 3)
+        self.exp_ring.hide()
+        play.addWidget(self.exp_ring)
         self.vc_save_btn = QPushButton(tr("vc_save"))
         self.vc_add_btn = QPushButton(tr("vc_to_list"), objectName="tinted")
         self.vc_save_btn.clicked.connect(lambda: self.export_clone(to_list=False))
@@ -669,7 +673,8 @@ class AnalysisWindow(QWidget):
             dest = Path(path)
         self.exporter = ExportWorker(self, self._p, dest)
         _keep_alive(self.exporter)
-        self._ui_progress = lambda x: self.info.setText(tr("an_exporting", p=int(x * 100)))
+        self._ui_progress = lambda x: (self.info.setText(tr("an_exporting", p=int(x * 100))),
+                                       self.exp_ring.show(), self.exp_ring.set_value(x))
         self._ui_done = lambda p: self.info.setText(tr("saved_in", path=p))
         self._ui_failed = lambda m: self.info.setText(tr("error") + "  " + m)
         self.exporter.progress.connect(self._ui_progress)
@@ -677,7 +682,7 @@ class AnalysisWindow(QWidget):
         self.exporter.failed.connect(self._ui_failed)
         if to_list and self.on_added:  # pencere kapatılsa da listeye eklensin
             self.exporter.done.connect(self.on_added)
-        self.exporter.finished.connect(lambda: setattr(self, "exporter", None))
+        self.exporter.finished.connect(lambda: (setattr(self, "exporter", None), self.exp_ring.hide()))
         self.info.setText(tr("an_exporting", p=0))
         self.exporter.start()
 
@@ -703,7 +708,12 @@ class AnalysisWindow(QWidget):
         vb.setContentsMargins(0, 0, 0, 0)
         vb.setSpacing(8)
         from PyQt6.QtWidgets import QPlainTextEdit
-        self.vc_text = QPlainTextEdit()
+
+        class _Text(QPlainTextEdit):  # odaklanınca modeli arka planda yüklemeye başla
+            def focusInEvent(inner, e):
+                super().focusInEvent(e)
+                self._prewarm()
+        self.vc_text = _Text()
         self.vc_text.setPlaceholderText(tr("vc_text_ph"))
         self.vc_text.setFixedHeight(110)
         self._vc_prog_set = False   # metin programla mı değişti
@@ -729,9 +739,15 @@ class AnalysisWindow(QWidget):
         self.vc_btn.clicked.connect(self._generate_clone)
         vb.addWidget(self.vc_btn)
         f.addWidget(self.vc_box)
+        srow = QHBoxLayout()
+        srow.setSpacing(10)
+        self.vc_ring = RingProgress(44, 4)
+        self.vc_ring.hide()
         self.vc_status = QLabel(objectName="faint")
         self.vc_status.setWordWrap(True)
-        f.addWidget(self.vc_status)
+        srow.addWidget(self.vc_ring)
+        srow.addWidget(self.vc_status, 1)
+        f.addLayout(srow)
         self._refresh_clone_section()
         if voiceclone.installed():
             self._prefill_clone()
@@ -746,10 +762,10 @@ class AnalysisWindow(QWidget):
         import voiceclone
         self.vc_dl = d = voiceclone.Downloader()
         _keep_alive(d)
-        d.progress.connect(lambda x: self.vc_status.setText(tr("vc_downloading", p=int(x * 100))))
+        d.progress.connect(lambda x: self._vc_progress(x, tr("vc_downloading", p=int(x * 100))))
         d.done.connect(lambda: (self.vc_status.setText(""), self._refresh_clone_section(), self._prefill_clone()))
         d.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
-        d.finished.connect(lambda: (setattr(self, "vc_dl", None), self._refresh_clone_section()))
+        d.finished.connect(lambda: (setattr(self, "vc_dl", None), self._refresh_clone_section(), self.vc_ring.hide()))
         self.vc_install.hide()
         self.vc_status.setText(tr("vc_downloading", p=0))
         d.start()
@@ -796,10 +812,11 @@ class AnalysisWindow(QWidget):
                 if force:
                     self._vc_user_edited = False
         w.info.connect(on_info)
+        w.progress.connect(lambda d, t: self._vc_progress(d / t if t else 0, tr("vc_getting_text")))
         w.finished_ok.connect(on_done)
         w.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
         w.finished.connect(lambda: (setattr(self, "vc_tr_worker", None), self.vc_get.setEnabled(True),
-                                    self.vc_status.setText("")))
+                                    self.vc_status.setText(""), self.vc_ring.hide()))
         self.vc_get.setEnabled(False)
         self.vc_status.setText(tr("vc_getting_text"))
         w.start()
@@ -815,14 +832,12 @@ class AnalysisWindow(QWidget):
             return
         # konuşmacı örneği: işlenmiş (gürültüsü ayıklanmış) bölüm varsa o, yoksa orijinal
         ref = self.result["after"] if self.result.get("after") is not None else self.result["seg"]
-        w = self.vc_worker = voiceclone.CloneWorker(ref, text, self.vc_lang.currentData(),
-                                                    max(2, (os.cpu_count() or 4) // 2))
+        w = self.vc_worker = voiceclone.CloneWorker(ref, text, self.vc_lang.currentData(), self._vc_threads())
         _keep_alive(w)
-        t0 = time.time()
-        msgs = {"load": lambda p: tr("vc_load"), "speaker": lambda p: tr("vc_speaker"),
-                "synth": lambda p: tr("vc_synth", p=int(p * 100))}
-        w.progress.connect(lambda p, k: self.vc_status.setText(msgs[k](p)))
-        w.done.connect(lambda wav: self._on_clone(wav, time.time() - t0))
+        t0 = time.monotonic()
+        msgs = {"load": tr("vc_load"), "speaker": tr("vc_speaker"), "synth": tr("vc_synth_stage")}
+        w.progress.connect(lambda p, k: self._vc_progress(p, f"{msgs[k]}  %{int(p * 100)}"))
+        w.done.connect(lambda wav: self._on_clone(wav, time.monotonic() - t0))
         w.failed.connect(lambda m: self.vc_status.setText(tr("error") + "  " + m))
         w.finished.connect(self._on_clone_end)
         self.vc_btn.setText(tr("vc_stop"))
@@ -831,8 +846,23 @@ class AnalysisWindow(QWidget):
         self.vc_btn.style().polish(self.vc_btn)
         w.start()
 
+    def _vc_threads(self):
+        import os
+        return max(2, (os.cpu_count() or 4) // 2)
+
+    def _prewarm(self):
+        import voiceclone
+        if voiceclone.installed() and not self._closed:
+            voiceclone.prewarm(self._vc_threads())
+
+    def _vc_progress(self, frac, text):
+        self.vc_ring.show()
+        self.vc_ring.set_value(frac)
+        self.vc_status.setText(text)
+
     def _on_clone_end(self):
         self.vc_worker = None
+        self.vc_ring.hide()
         self.vc_btn.setText(tr("vc_generate"))
         self.vc_btn.setObjectName("primary")
         self.vc_btn.style().unpolish(self.vc_btn)

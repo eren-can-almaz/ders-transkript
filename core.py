@@ -233,14 +233,14 @@ class ModelCache:
             entry = self._models.get((name, threads))
             if entry:
                 entry[1] -= 1
-                entry[2] = time.time()
+                entry[2] = time.monotonic()
         t = threading.Timer(self.IDLE_RELEASE_SEC + 1, self._collect)
         t.daemon = True
         t.start()
 
     def _collect(self):
         with self._lock:
-            now = time.time()
+            now = time.monotonic()
             for key in [k for k, (_, n, t) in self._models.items()
                         if n <= 0 and now - t >= self.IDLE_RELEASE_SEC]:
                 del self._models[key]
@@ -288,7 +288,7 @@ class FileWorker(QThread):
         self.cancelled = True
 
     def run(self):
-        t0 = time.time()
+        t0 = time.monotonic()
         model = None
         try:
             self.step.emit(0)
@@ -326,7 +326,7 @@ class FileWorker(QThread):
                 self.segment.emit(join_piece(text, seg.start + offset, last_end, self.timestamps))
                 last_end = seg.end + offset
             self.progress.emit(duration, duration)
-            self.finished_ok.emit(time.time() - t0)
+            self.finished_ok.emit(time.monotonic() - t0)
         except Exception as e:
             self.failed.emit(f"{type(e).__name__}: {e}")
         finally:
@@ -606,9 +606,9 @@ class LiveWorker(QThread):
         started = 0.0
         while not self._draft_stop.is_set():
             # aralık bir önceki taslağın başından sayılır: çeviri sürdüyse beklemeden devam
-            self._draft_wake.wait(max(0.1, self.draft_interval - (time.time() - started)))
+            self._draft_wake.wait(max(0.1, self.draft_interval - (time.monotonic() - started)))
             self._draft_wake.clear()
-            started = time.time()
+            started = time.monotonic()
             if self._draft_stop.is_set():
                 break
             with self._lock:
