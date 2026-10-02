@@ -1,206 +1,165 @@
-"""Görünüm: açık/koyu tema renkleri, stil dosyası ve uygulama ikonu."""
+"""Görünüm: Apple tarzı sade açık/koyu tema, stil dosyası ve çizilen simgeler."""
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
-BRAND = "#3f51d8"  # ikon rengi (temadan bağımsız)
+BRAND = "#0a7aff"  # uygulama ikonu rengi (temadan bağımsız)
 
 THEMES = {
     "light": {
-        "bg": "#f4f5f8", "card": "#ffffff", "border": "#e3e6ec", "border_strong": "#cfd4dd",
-        "text": "#121826", "muted": "#5f6878", "faint": "#8b93a3",
-        "accent": "#3f51d8", "accent_hover": "#3443bd", "accent_soft": "#eef0fd",
-        "accent_disabled": "#b6bdee", "on_accent": "#ffffff", "ok": "#12805c", "ok_soft": "#e7f6ef",
-        "hover": "#f1f3f7", "seg_bg": "#eceef3", "track": "#e8eaf0",
-        "scroll": "#d3d7df", "scroll_hover": "#b9bfca", "selection": "#cdd3fb",
-        "disabled_bg": "#f7f8fa", "disabled_text": "#a9afbb",
-        "danger": "#b42318", "danger_border": "#f1b8b2", "danger_hover": "#fef3f2",
-        "warn": "#b54708", "live": "#d92d20",
+        "bg": "#ffffff", "side": "#f5f5f7", "fill": "#f2f2f5", "fill2": "#e7e7ec", "sep": "#e4e4e9",
+        "text": "#1d1d1f", "muted": "#6e6e73", "faint": "#a1a1a6",
+        "accent": "#007aff", "accent_hover": "#0068db", "accent_soft": "#e6f1ff", "on_accent": "#ffffff",
+        "red": "#ff3b30", "red_soft": "#ffebe9", "green": "#34c759", "orange": "#ff9500",
+        "selection": "#cfe3ff", "row_sel": "#e6e6eb", "disabled": "#c1c1c6", "scroll": "#d1d1d6",
+        "ring": "#d9d9de", "shadow": "#00000018",
     },
     "dark": {
-        "bg": "#0f1217", "card": "#171b22", "border": "#262b35", "border_strong": "#353c49",
-        "text": "#e8ebf1", "muted": "#a2aabb", "faint": "#7d8597",
-        "accent": "#7183ff", "accent_hover": "#8494ff", "accent_soft": "#1e2443",
-        "accent_disabled": "#353c6b", "on_accent": "#0b0e1a", "ok": "#41c98f", "ok_soft": "#11291f",
-        "hover": "#1f242d", "seg_bg": "#0f1217", "track": "#262b35",
-        "scroll": "#353c49", "scroll_hover": "#4a5262", "selection": "#34408c",
-        "disabled_bg": "#14171d", "disabled_text": "#5c6475",
-        "danger": "#ff8a80", "danger_border": "#5c2c2c", "danger_hover": "#2a1717",
-        "warn": "#fdb022", "live": "#f97066",
+        "bg": "#1c1c1e", "side": "#242426", "fill": "#2c2c2e", "fill2": "#3a3a3c", "sep": "#38383a",
+        "text": "#f5f5f7", "muted": "#a1a1a6", "faint": "#6e6e73",
+        "accent": "#0a84ff", "accent_hover": "#3d9bff", "accent_soft": "#102a47", "on_accent": "#ffffff",
+        "red": "#ff453a", "red_soft": "#3b1f1d", "green": "#30d158", "orange": "#ff9f0a",
+        "selection": "#264f78", "row_sel": "#3a3a3c", "disabled": "#5a5a5e", "scroll": "#48484a",
+        "ring": "#48484a", "shadow": "#00000060",
     },
 }
 _current_theme = "light"
 THEME_CHOICES = [("theme_system", "system"), ("theme_light", "light"), ("theme_dark", "dark")]
 
 STYLE = """
-* {{ font-size: 13px; color: {text}; }}
-QMainWindow, QWidget#root {{ background: {bg}; }}
+* {{ color: {text}; font-size: 14px; }}
+QMainWindow, QWidget#content, QStackedWidget#detail {{ background: {bg}; }}
+QDialog {{ background: {bg}; }}
 QLabel {{ background: transparent; }}
-QLabel#title {{ font-size: 20px; font-weight: 700; }}
-QLabel#subtitle, QLabel#muted {{ color: {muted}; }}
-QLabel#badge {{
-    color: {ok}; background: {ok_soft}; border-radius: 11px;
-    padding: 3px 10px; font-size: 12px; font-weight: 600;
+
+/* kenar çubuğu */
+QFrame#sidebar {{ background: {side}; border: none; border-right: 1px solid {sep}; }}
+QLabel#appTitle {{ font-size: 20px; font-weight: 700; }}
+QFrame#row {{ background: transparent; border-radius: 10px; }}
+QFrame#row:hover {{ background: {fill}; }}
+QFrame#row[selected="true"] {{ background: {row_sel}; }}
+QLabel#rowTitle {{ font-size: 14px; font-weight: 600; }}
+QLabel#rowMeta {{ font-size: 12px; color: {muted}; }}
+QLabel#rowBadge {{ font-size: 12px; font-weight: 600; color: {muted}; }}
+QLabel#rowBadge[kind="rec"] {{ color: {red}; }}
+QLabel#rowBadge[kind="busy"] {{ color: {accent}; }}
+QLabel#rowBadge[kind="unsaved"] {{ color: {orange}; }}
+
+/* metin */
+QLabel#h1 {{ font-size: 26px; font-weight: 700; }}
+QLineEdit#titleEdit {{
+    font-size: 26px; font-weight: 700; background: transparent; border: none;
+    border-radius: 8px; padding: 2px 6px; margin-left: -6px; selection-background-color: {selection};
 }}
-QLabel#section {{ color: {faint}; font-size: 11px; font-weight: 700; letter-spacing: 0.6px; }}
-QLabel#hint {{ color: {muted}; font-size: 12px; }}
-QFrame#sep {{ background: {border}; border: none; }}
+QLineEdit#titleEdit:hover {{ background: {fill}; }}
+QLineEdit#titleEdit:focus {{ background: {fill}; }}
+QLabel#meta {{ color: {muted}; font-size: 13px; }}
+QLabel#muted {{ color: {muted}; }}
+QLabel#faint {{ color: {faint}; font-size: 12px; }}
+QLabel#timer {{ font-size: 54px; font-weight: 300; }}
+QLabel#status {{ color: {muted}; font-size: 13px; font-weight: 600; }}
+QLabel#status[on="true"] {{ color: {red}; }}
+QLabel#emptyTitle {{ font-size: 22px; font-weight: 700; }}
+QLabel#sectionTitle {{ font-size: 15px; font-weight: 700; }}
+QLabel#warn {{ color: {orange}; font-size: 12px; font-weight: 600; }}
 
-QFrame#card {{ background: {card}; border: 1px solid {border}; border-radius: 12px; }}
-QFrame#drop {{ background: {card}; border: 1.5px dashed {border_strong}; border-radius: 12px; }}
-QFrame#drop[hover="true"] {{ border-color: {accent}; background: {accent_soft}; }}
-QLabel#fileName {{ font-size: 14px; font-weight: 600; }}
-
+/* düğmeler: dolgulu, renkli-açık (tinted), sade */
 QPushButton {{
-    background: {card}; border: 1px solid {border_strong}; border-radius: 8px;
-    padding: 7px 14px; font-weight: 600;
+    background: {fill}; border: none; border-radius: 9px; padding: 8px 16px; font-weight: 600;
 }}
-QPushButton:hover {{ background: {hover}; }}
-QPushButton:disabled {{ color: {disabled_text}; border-color: {border}; background: {disabled_bg}; }}
-QPushButton#primary {{ background: {accent}; color: {on_accent}; border: none; padding: 9px 22px; }}
+QPushButton:hover {{ background: {fill2}; }}
+QPushButton:disabled {{ color: {disabled}; background: {fill}; }}
+QPushButton#primary {{ background: {accent}; color: {on_accent}; }}
 QPushButton#primary:hover {{ background: {accent_hover}; }}
-QPushButton#primary:disabled {{ background: {accent_disabled}; color: {on_accent}; }}
-QPushButton#danger {{ background: {card}; color: {danger}; border: 1px solid {danger_border}; padding: 9px 22px; }}
-QPushButton#danger:hover {{ background: {danger_hover}; }}
-QPushButton#copy {{ background: {accent}; color: {on_accent}; border: none; }}
-QPushButton#copy:hover {{ background: {accent_hover}; }}
-QPushButton#copy:disabled {{ background: {accent_disabled}; color: {on_accent}; }}
-QPushButton#copy[done="true"] {{ background: {ok}; }}
-
-QFrame#segbox {{ background: {seg_bg}; border: 1px solid {border}; border-radius: 8px; }}
-QPushButton#seg {{
-    background: transparent; border: none; border-radius: 6px; padding: 6px 16px;
-    color: {muted}; font-weight: 600;
+QPushButton#primary:disabled {{ background: {fill2}; color: {disabled}; }}
+QPushButton#tinted {{ background: {accent_soft}; color: {accent}; }}
+QPushButton#tinted:hover {{ background: {fill2}; }}
+QPushButton#tinted[done="true"] {{ color: {green}; }}
+QPushButton#destructive {{ background: {red_soft}; color: {red}; }}
+QPushButton#destructive:hover {{ background: {fill2}; }}
+QPushButton#plain {{ background: transparent; color: {accent}; padding: 6px 8px; }}
+QPushButton#plain:hover {{ background: {fill}; }}
+QPushButton#add {{
+    background: {fill2}; border-radius: 15px; padding: 0; font-size: 20px; font-weight: 400;
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; color: {text};
 }}
-QPushButton#seg:hover {{ color: {text}; background: transparent; }}
-QPushButton#seg:checked {{ background: {card}; color: {accent}; border: 1px solid {border_strong}; }}
-QPushButton#seg:disabled {{ color: {disabled_text}; }}
-QFrame#segbox[small="true"] QPushButton#seg {{ padding: 3px 10px; font-size: 12px; }}
+QPushButton#add:hover {{ background: {accent}; color: {on_accent}; }}
+QPushButton#add::menu-indicator {{ image: none; width: 0; }}
+QPushButton#gear {{ background: transparent; color: {muted}; padding: 6px 10px; text-align: left; font-weight: 500; }}
+QPushButton#gear:hover {{ background: {fill2}; color: {text}; }}
+QPushButton#round {{
+    background: {fill}; border-radius: 22px; padding: 0;
+    min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px;
+}}
+QPushButton#round:hover {{ background: {fill2}; }}
+QPushButton#play {{
+    background: {accent}; border-radius: 20px; padding: 0;
+    min-width: 40px; max-width: 40px; min-height: 40px; max-height: 40px;
+}}
+QPushButton#play:hover {{ background: {accent_hover}; }}
+QPushButton#choice {{ background: {fill}; padding: 14px 18px; text-align: left; font-size: 15px; border-radius: 12px; }}
+QPushButton#choice:hover {{ background: {accent_soft}; color: {accent}; }}
 
+/* giriş alanları */
 QComboBox {{
-    background: {card}; border: 1px solid {border_strong}; border-radius: 8px;
-    padding: 6px 30px 6px 10px; min-width: 130px;
+    background: {fill}; border: none; border-radius: 8px; padding: 6px 28px 6px 10px; min-width: 110px;
 }}
-QComboBox:disabled {{ color: {disabled_text}; }}
-QComboBox::drop-down {{ border: none; width: 26px; }}
+QComboBox:hover {{ background: {fill2}; }}
+QComboBox:disabled {{ color: {disabled}; }}
+QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox::down-arrow {{ image: url({ARROW_PNG}); width: 10px; height: 10px; }}
 QComboBox QAbstractItemView {{
-    background: {card}; border: 1px solid {border}; selection-background-color: {accent_soft};
-    selection-color: {text}; outline: none; padding: 4px;
+    background: {bg}; border: 1px solid {sep}; border-radius: 8px; padding: 4px; outline: none;
+    selection-background-color: {accent}; selection-color: {on_accent};
 }}
-QCheckBox {{ spacing: 8px; color: {muted}; }}
-QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {border_strong}; border-radius: 4px; background: {card}; }}
+QCheckBox {{ spacing: 8px; }}
+QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid {disabled}; background: {bg}; }}
 QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; image: url({CHECK_PNG}); }}
-
-QCheckBox#switch {{ spacing: 10px; color: {text}; font-weight: 600; }}
-QCheckBox#switch::indicator {{ width: 38px; height: 22px; border: none; background: transparent; image: url({SWITCH_OFF}); }}
+QCheckBox#switch {{ spacing: 10px; font-weight: 500; }}
+QCheckBox#switch::indicator {{ width: 42px; height: 26px; border: none; background: transparent; image: url({SWITCH_OFF}); }}
 QCheckBox#switch::indicator:checked {{ image: url({SWITCH_ON}); }}
 
-QProgressBar {{ background: {track}; border: none; border-radius: 4px; }}
-QProgressBar::chunk {{ background: {accent}; border-radius: 4px; }}
-QLabel#step {{ font-size: 14px; font-weight: 600; }}
-QLabel#pct {{ color: {accent}; font-size: 24px; font-weight: 700; }}
-QLabel#k {{ color: {faint}; font-size: 11px; font-weight: 600; }}
-QLabel#v {{ font-size: 14px; font-weight: 600; }}
+QProgressBar {{ background: {fill2}; border: none; border-radius: 2px; max-height: 4px; }}
+QProgressBar::chunk {{ background: {accent}; border-radius: 2px; }}
+QSlider::groove:horizontal {{ height: 4px; background: {fill2}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {accent}; border-radius: 2px; }}
+QSlider::handle:horizontal {{
+    background: #ffffff; border: 1px solid {sep}; width: 14px; height: 14px; margin: -6px 0; border-radius: 7px;
+}}
 
+QFrame#box {{ background: {fill}; border-radius: 14px; }}
+QFrame#sep {{ background: {sep}; border: none; max-height: 1px; min-height: 1px; }}
 QPlainTextEdit {{
-    background: transparent; border: none; padding: 4px 6px;
-    selection-background-color: {selection}; font-size: 14px;
+    background: transparent; border: none; font-size: 15px; selection-background-color: {selection};
 }}
-QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {scroll}; border-radius: 4px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: {scroll_hover}; }}
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: {scroll}; border-radius: 3px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ background: none; height: 0; }}
-QMessageBox, QFileDialog, QDialog {{ background: {card}; }}
-
-QFrame#segbox[tabs="true"] QPushButton#seg {{ padding: 7px 18px; font-size: 13px; }}
-QPushButton#toggle {{ padding: 6px 12px; color: {muted}; }}
-QPushButton#toggle:checked {{ background: {accent_soft}; color: {accent}; border-color: {accent}; }}
-QPushButton#icon {{ padding: 6px 10px; min-width: 0; }}
-QProgressBar#meter {{ background: {track}; border-radius: 3px; }}
-QProgressBar#meter::chunk {{ background: {ok}; border-radius: 3px; }}
-QLabel#liveDot {{ color: {live}; font-size: 14px; font-weight: 700; }}
-QLabel#warn {{ color: {warn}; font-size: 12px; font-weight: 600; }}
-QComboBox#small {{ min-width: 90px; padding: 3px 26px 3px 8px; font-size: 12px; }}
-
-QPushButton#recBtn {{
-    background: {card}; border: 2px solid {border_strong}; border-radius: 32px;
-    min-width: 64px; max-width: 64px; min-height: 64px; max-height: 64px; padding: 0;
-}}
-QPushButton#recBtn:hover {{ border-color: {live}; background: {hover}; }}
-QPushButton#recBtn:disabled {{ background: {disabled_bg}; border-color: {border}; }}
-QPushButton#roundBtn {{
-    background: {card}; border: 1px solid {border_strong}; border-radius: 22px;
-    min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px; padding: 0;
-}}
-QPushButton#roundBtn:hover {{ background: {hover}; }}
-QLabel#timer {{ font-size: 30px; font-weight: 700; font-family: "SF Mono", "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace; }}
-QLabel#recState {{ color: {muted}; font-size: 12px; font-weight: 700; letter-spacing: 0.8px; }}
-QLabel#recState[on="true"] {{ color: {live}; }}
-QLabel#path {{ color: {muted}; font-size: 12px; }}
-QPushButton#collapse {{
-    background: transparent; border: none; padding: 2px 0; text-align: left;
-    color: {muted}; font-size: 12px; font-weight: 700;
-}}
-QPushButton#collapse:hover {{ color: {text}; background: transparent; }}
-QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
-QFrame#takeRow {{ background: transparent; border: 1px solid transparent; border-radius: 8px; }}
-QFrame#takeRow:hover {{ background: {hover}; }}
-QFrame#takeRow[selected="true"] {{ background: {accent_soft}; border-color: {accent}; }}
-QLabel#takeTitle {{ font-weight: 600; }}
-QPushButton#roundSmall {{
-    background: {card}; border: 1px solid {border_strong}; border-radius: 15px;
-    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; padding: 0;
-}}
-QPushButton#primarySmall {{ background: {accent}; color: {on_accent}; border: none; padding: 5px 12px; }}
-QPushButton#primarySmall:hover {{ background: {accent_hover}; }}
-QPushButton#dangerSmall {{ background: transparent; color: {danger}; border: 1px solid {danger_border}; padding: 5px 12px; }}
-QPushButton#dangerSmall:hover {{ background: {danger_hover}; }}
-QFrame#tabbar {{ background: {seg_bg}; border: 1px solid {border}; border-radius: 10px; }}
-QFrame#tab {{ background: transparent; border: 1px solid transparent; border-radius: 7px; }}
-QFrame#tab:hover {{ background: {hover}; }}
-QFrame#tab[active="true"] {{ background: {card}; border-color: {border_strong}; }}
-QLabel#tabLabel {{ color: {muted}; font-weight: 600; }}
-QLabel#tabLabel[active="true"] {{ color: {accent}; }}
-QPushButton#tabClose {{
-    background: transparent; border: none; border-radius: 9px; color: {faint};
-    min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; padding: 0 0 2px 0; font-size: 15px;
-}}
-QPushButton#tabClose:hover {{ background: {danger_hover}; color: {danger}; }}
-QPushButton#addTab {{
-    background: transparent; border: 1px dashed {border_strong}; border-radius: 7px;
-    min-width: 32px; padding: 4px 8px; font-size: 16px; color: {muted};
-}}
-QPushButton#addTab:hover {{ border-color: {accent}; color: {accent}; background: {accent_soft}; }}
-QPushButton#addTab::menu-indicator {{ image: none; width: 0; }}
-QMenu {{ background: {card}; border: 1px solid {border}; padding: 4px; }}
-QMenu::item {{ padding: 7px 18px; border-radius: 6px; color: {text}; }}
-QMenu::item:selected {{ background: {accent_soft}; color: {accent}; }}
-QMenu::item:disabled {{ color: {disabled_text}; }}
-QLabel#plus {{
-    color: {accent}; background: {accent_soft}; border-radius: 36px; font-size: 40px; font-weight: 300;
-    min-width: 72px; max-width: 72px; min-height: 72px; max-height: 72px;
-}}
-QLabel#emptyTitle {{ font-size: 17px; font-weight: 700; }}
-QPushButton#choice {{ padding: 12px 18px; text-align: left; font-size: 14px; }}
-QPushButton#choice:hover {{ border-color: {accent}; color: {accent}; background: {accent_soft}; }}
-QPushButton#link {{ background: transparent; border: none; color: {accent}; padding: 2px 4px; font-weight: 600; }}
-QPushButton#link:hover {{ text-decoration: underline; background: transparent; }}
+QMenu {{ background: {bg}; border: 1px solid {sep}; border-radius: 10px; padding: 6px; }}
+QMenu::item {{ padding: 8px 20px 8px 12px; border-radius: 6px; }}
+QMenu::item:selected {{ background: {accent}; color: {on_accent}; }}
+QMenu::item:disabled {{ color: {disabled}; }}
+QToolTip {{ background: {fill2}; color: {text}; border: none; padding: 4px 8px; }}
 """
 
 
 def _make_assets(theme):
-    """Stil dosyasının kullandığı küçük ikonları çizer (harici dosya gerekmesin diye)."""
-    from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygonF
-    from PyQt6.QtCore import QPointF
+    """Stil dosyasının kullandığı küçük görseller (ok, onay işareti, anahtar)."""
     import tempfile
 
     c = THEMES[theme]
     d = Path(tempfile.gettempdir()) / "ders_transkript_ui"
     d.mkdir(exist_ok=True)
 
-    def draw(name, color, points, width):
+    def save(pm, name):
+        path = d / f"{name}_{theme}.png"
+        pm.save(str(path))
+        return path.as_posix()
+
+    def line(name, color, points, width):
         pm = QPixmap(20, 20)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
@@ -208,31 +167,28 @@ def _make_assets(theme):
         p.setPen(QPen(QColor(color), width, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
         p.drawPolyline(QPolygonF([QPointF(x, y) for x, y in points]))
         p.end()
-        path = d / f"{name}_{theme}.png"
-        pm.save(str(path))
-        return path.as_posix()
+        return save(pm, name)
 
-    def switch(name, track, knob_right):
-        from PyQt6.QtCore import QRectF
-        pm = QPixmap(76, 44)  # 2x çözünürlük: 38x22 gösterilir
+    def switch(name, track, on):
+        pm = QPixmap(84, 52)  # 2x: 42x26 gösterilir
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(track))
-        p.drawRoundedRect(QRectF(0, 0, 76, 44), 22, 22)
+        p.drawRoundedRect(QRectF(0, 0, 84, 52), 26, 26)
+        p.setBrush(QColor(0, 0, 0, 40))
+        p.drawEllipse(QRectF((36 if on else 4), 5, 44, 44))
         p.setBrush(QColor("#ffffff"))
-        p.drawEllipse(QRectF(36 if knob_right else 4, 4, 36, 36))
+        p.drawEllipse(QRectF((36 if on else 4), 4, 44, 44))
         p.end()
-        path = d / f"{name}_{theme}.png"
-        pm.save(str(path))
-        return path.as_posix()
+        return save(pm, name)
 
     return {
-        "ARROW_PNG": draw("arrow", c["muted"], [(4, 7), (10, 13), (16, 7)], 2.4),
-        "CHECK_PNG": draw("check", c["on_accent"], [(4.5, 10.5), (8.5, 14.5), (15.5, 6)], 2.6),
-        "SWITCH_OFF": switch("switch_off", c["border_strong"], False),
-        "SWITCH_ON": switch("switch_on", c["accent"], True),
+        "ARROW_PNG": line("arrow", c["muted"], [(5, 8), (10, 13), (15, 8)], 2.2),
+        "CHECK_PNG": line("check", c["on_accent"], [(4.5, 10.5), (8.5, 14.5), (15.5, 6)], 2.6),
+        "SWITCH_OFF": switch("switch_off", c["fill2"], False),
+        "SWITCH_ON": switch("switch_on", c["green"], True),
     }
 
 
@@ -245,30 +201,32 @@ def system_is_dark():
 
 def apply_theme(app, choice):
     """choice: 'system' | 'light' | 'dark'. Stil dosyası + palet (diyaloglar için) uygulanır."""
-    from PyQt6.QtGui import QColor, QPalette
+    from PyQt6.QtGui import QPalette
 
     global _current_theme
     theme = choice if choice in THEMES else ("dark" if system_is_dark() else "light")
     _current_theme = theme
     c = THEMES[theme]
     pal = QPalette()
-    for role, key in [(QPalette.ColorRole.Window, "bg"), (QPalette.ColorRole.Base, "card"),
-                      (QPalette.ColorRole.AlternateBase, "hover"), (QPalette.ColorRole.Button, "card"),
+    for role, key in [(QPalette.ColorRole.Window, "bg"), (QPalette.ColorRole.Base, "bg"),
+                      (QPalette.ColorRole.AlternateBase, "fill"), (QPalette.ColorRole.Button, "fill"),
                       (QPalette.ColorRole.Text, "text"), (QPalette.ColorRole.WindowText, "text"),
                       (QPalette.ColorRole.ButtonText, "text"), (QPalette.ColorRole.PlaceholderText, "faint"),
-                      (QPalette.ColorRole.Highlight, "selection"), (QPalette.ColorRole.HighlightedText, "text"),
-                      (QPalette.ColorRole.ToolTipBase, "card"), (QPalette.ColorRole.ToolTipText, "text")]:
+                      (QPalette.ColorRole.Highlight, "accent"), (QPalette.ColorRole.HighlightedText, "on_accent"),
+                      (QPalette.ColorRole.ToolTipBase, "fill2"), (QPalette.ColorRole.ToolTipText, "text")]:
         pal.setColor(role, QColor(c[key]))
     app.setPalette(pal)
     app.setStyleSheet(STYLE.format(**c, **_make_assets(theme)))
     return theme
 
 
-def icon_pixmap(size=256):
-    """Uygulama ikonu: lacivert yuvarlak kare içinde ses dalgası (256 birimlik çizim ölçeklenir)."""
-    from PyQt6.QtGui import QColor, QPainter, QPixmap
-    from PyQt6.QtCore import QRectF
+def colors():
+    """Şu an uygulanan temanın renkleri (özel çizimler için)."""
+    return THEMES[_current_theme]
 
+
+def icon_pixmap(size=256):
+    """Uygulama ikonu: mavi yuvarlak kare içinde ses dalgası (256 birimlik çizim ölçeklenir)."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -286,35 +244,50 @@ def icon_pixmap(size=256):
 
 
 def app_icon():
-    from PyQt6.QtGui import QIcon
     return QIcon(icon_pixmap(256))
 
 
-def media_icon(kind, color, size=64):
-    """Kayıt düğmesi simgeleri: 'record' (dolu daire), 'stop' (kare), 'pause' (iki çubuk), 'play' (üçgen)."""
-    from PyQt6.QtCore import QPointF, QRectF
-    from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
-
+def glyph(kind, color, size=48):
+    """Basit simgeler: record, stop, pause, play, plus, mic, doc, gear."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    u = size / 48
+    col = QColor(color)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor(color))
-    u = size / 64
+    p.setBrush(col)
     if kind == "record":
-        p.drawEllipse(QRectF(14 * u, 14 * u, 36 * u, 36 * u))
+        p.drawEllipse(QRectF(10 * u, 10 * u, 28 * u, 28 * u))
     elif kind == "stop":
-        p.drawRoundedRect(QRectF(19 * u, 19 * u, 26 * u, 26 * u), 5 * u, 5 * u)
+        p.drawRoundedRect(QRectF(14 * u, 14 * u, 20 * u, 20 * u), 4 * u, 4 * u)
     elif kind == "pause":
-        p.drawRoundedRect(QRectF(19 * u, 16 * u, 9 * u, 32 * u), 3 * u, 3 * u)
-        p.drawRoundedRect(QRectF(36 * u, 16 * u, 9 * u, 32 * u), 3 * u, 3 * u)
+        p.drawRoundedRect(QRectF(14 * u, 12 * u, 7 * u, 24 * u), 2.5 * u, 2.5 * u)
+        p.drawRoundedRect(QRectF(27 * u, 12 * u, 7 * u, 24 * u), 2.5 * u, 2.5 * u)
     elif kind == "play":
-        p.drawPolygon(QPolygonF([QPointF(22 * u, 15 * u), QPointF(50 * u, 32 * u), QPointF(22 * u, 49 * u)]))
+        path = QPainterPath()
+        path.moveTo(17 * u, 12 * u)
+        path.lineTo(36 * u, 24 * u)
+        path.lineTo(17 * u, 36 * u)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif kind in ("mic", "doc", "gear"):
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 3 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
+        if kind == "mic":
+            p.drawRoundedRect(QRectF(18 * u, 8 * u, 12 * u, 20 * u), 6 * u, 6 * u)
+            p.drawArc(QRectF(12 * u, 14 * u, 24 * u, 20 * u), 200 * 16, 140 * 16)
+            p.drawLine(QPointF(24 * u, 34 * u), QPointF(24 * u, 40 * u))
+        elif kind == "doc":
+            p.drawRoundedRect(QRectF(12 * u, 7 * u, 24 * u, 34 * u), 4 * u, 4 * u)
+            for y in (17, 24, 31):
+                p.drawLine(QPointF(18 * u, y * u), QPointF(30 * u, y * u))
+        else:
+            p.drawEllipse(QRectF(17 * u, 17 * u, 14 * u, 14 * u))
+            import math
+            for k in range(8):
+                a = k * math.pi / 4
+                p.drawLine(QPointF(24 * u + 11 * u * math.cos(a), 24 * u + 11 * u * math.sin(a)),
+                           QPointF(24 * u + 15 * u * math.cos(a), 24 * u + 15 * u * math.sin(a)))
     p.end()
     return QIcon(pm)
-
-
-def current_colors():
-    """Şu an uygulanan temanın renkleri (simgeleri temaya göre çizmek için)."""
-    return THEMES[_current_theme]

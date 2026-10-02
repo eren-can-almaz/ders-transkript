@@ -1,82 +1,148 @@
 """Ders Transkript — ders kayıtlarını ve canlı konuşmayı internetsiz metne çeviren masaüstü uygulaması.
 
-faster-whisper (CPU, int8) + PyQt6. İki bağımsız panel: ses dosyası ve canlı dinleme;
-tarayıcı gibi kapatılabilir sekmelerde (+ ile yenisi açılır) ya da yan yana kullanılabilir;
-aynı anda çalışabilirler.
-Modüller: core (modeller, işçiler), panels (iki panel), widgets (ortak parçalar),
-theme (açık/koyu tema), i18n (arayüz dilleri).
+faster-whisper (CPU, int8) + PyQt6. Apple Ses Kayıtları tarzı: solda kayıtlar ve eklenen ses
+dosyaları listesi (+ ile yenisi), sağda seçilenin sayfası. Her sayfa bağımsız çalışır.
+Modüller: core (modeller, işçiler), library (liste ve kalıcılık), views (ayrıntı sayfası),
+ui_parts (arayüz parçaları), audio (mikrofon), theme (görünüm), i18n (arayüz dilleri).
 """
 import os
 import sys
+from pathlib import Path
 
-from PyQt6.QtCore import QSettings, QSize, Qt
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import QSettings, QSize, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
-    QPushButton, QScrollArea, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 import i18n
-from core import MODES, QUALITY, decode_audio, lower_priority, model_path
+from core import AUDIO_EXT, MODES, QUALITY, decode_audio, lower_priority, model_path, probe_audio, recordings_dir
 from i18n import UI_LANGUAGES, tr
-from panels import FilePanel, LivePanel
-from theme import THEME_CHOICES, app_icon, apply_theme, current_colors, media_icon
-from widgets import Segmented, TabChip
-
-
-class Entry:
-    """Açık bir pencere (sekme): türü, paneli, kaydırma alanı, sekme çipi ve durumu."""
-
-    def __init__(self, kind, panel, area, chip):
-        self.kind, self.panel, self.area, self.chip = kind, panel, area, chip
-        self.status = ""
-
-    def title(self):
-        return self.panel.tab_title() if self.kind == "file" else tr("tab_live")
+from library import Item, Library
+from theme import THEME_CHOICES, app_icon, apply_theme, colors, glyph, icon_pixmap
+from ui_parts import ItemRow
+from views import ItemView
 
 
 class EmptyState(QWidget):
-    """Hiç pencere açık değilken: büyük + ve iki seçenek."""
+    """Listede hiçbir şey yokken ya da hiçbir şey seçili değilken."""
 
-    def __init__(self, on_new):
+    def __init__(self, on_new, on_add):
         super().__init__()
         outer = QVBoxLayout(self)
-        outer.addStretch()
-        card = QFrame(objectName="card")
-        card.setFixedWidth(440)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(32, 28, 32, 28)
-        lay.setSpacing(12)
-        plus = QLabel("+", objectName="plus")
-        plus.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(plus, alignment=Qt.AlignmentFlag.AlignHCenter)
+        outer.addStretch(2)
+        icon = QLabel()
+        icon.setPixmap(icon_pixmap(160).scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        outer.addWidget(icon)
+        outer.addSpacing(10)
         self.title = QLabel(objectName="emptyTitle")
-        self.hint = QLabel(objectName="hint")
+        self.hint = QLabel(objectName="muted")
         for w in (self.title, self.hint):
             w.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lay.addWidget(w)
-        lay.addSpacing(6)
+            outer.addWidget(w)
+        outer.addSpacing(18)
+        col = QVBoxLayout()
+        col.setSpacing(10)
+        self.btn_rec = QPushButton(objectName="choice")
         self.btn_file = QPushButton(objectName="choice")
-        self.btn_live = QPushButton(objectName="choice")
-        for b, kind in ((self.btn_file, "file"), (self.btn_live, "live")):
+        for b, fn in ((self.btn_rec, on_new), (self.btn_file, on_add)):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setIconSize(QSize(22, 22))
-            b.clicked.connect(lambda _=False, k=kind: on_new(k))
-            lay.addWidget(b)
-        row = QHBoxLayout()
-        row.addStretch()
-        row.addWidget(card)
-        row.addStretch()
-        outer.addLayout(row)
-        outer.addStretch()
+            b.setIconSize(QSize(24, 24))
+            b.setFixedWidth(320)
+            b.clicked.connect(fn)
+            col.addWidget(b, alignment=Qt.AlignmentFlag.AlignHCenter)
+        outer.addLayout(col)
+        outer.addStretch(3)
 
     def retranslate(self):
+        c = colors()
         self.title.setText(tr("empty_title"))
         self.hint.setText(tr("empty_hint"))
-        self.btn_file.setText("   " + tr("new_file"))
-        self.btn_live.setText("   " + tr("new_live"))
-        self.btn_file.setIcon(app_icon())
-        self.btn_live.setIcon(media_icon("record", current_colors()["live"]))
+        self.btn_rec.setText("   " + tr("new_recording"))
+        self.btn_file.setText("   " + tr("add_file"))
+        self.btn_rec.setIcon(glyph("record", c["red"]))
+        self.btn_file.setIcon(glyph("doc", c["accent"]))
+
+
+class SettingsDialog(QDialog):
+    """Seyrek değişen ayarlar: arayüz dili, görünüm, kayıt klasörü."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setModal(True)
+        self.setMinimumWidth(460)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(26, 24, 26, 20)
+        lay.setSpacing(16)
+        self.heading = QLabel(objectName="emptyTitle")
+        lay.addWidget(self.heading)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(14)
+        self.l_lang, self.l_theme, self.l_folder = (QLabel(objectName="muted") for _ in range(3))
+        self.lang = QComboBox()
+        for code, name in UI_LANGUAGES:
+            self.lang.addItem(name, code)
+        self.lang.setCurrentIndex(max(0, self.lang.findData(i18n.get_lang())))
+        self.lang.currentIndexChanged.connect(lambda: win.set_ui_lang(self.lang.currentData()))
+        self.theme = QComboBox()
+        self.theme.currentIndexChanged.connect(lambda i: i >= 0 and win.set_theme(i))
+        self.folder = QLabel(objectName="muted")
+        f_row = QHBoxLayout()
+        f_row.addWidget(self.folder, 1)
+        self.change = QPushButton(objectName="plain")
+        self.change.clicked.connect(self._choose)
+        self.open = QPushButton(objectName="plain")
+        self.open.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(win.folder))))
+        f_row.addWidget(self.change)
+        f_row.addWidget(self.open)
+        grid.addWidget(self.l_lang, 0, 0)
+        grid.addWidget(self.lang, 0, 1)
+        grid.addWidget(self.l_theme, 1, 0)
+        grid.addWidget(self.theme, 1, 1)
+        grid.addWidget(self.l_folder, 2, 0)
+        grid.addLayout(f_row, 2, 1)
+        grid.setColumnStretch(1, 1)
+        lay.addLayout(grid)
+        self.offline = QLabel(objectName="faint")
+        lay.addWidget(self.offline)
+        row = QHBoxLayout()
+        row.addStretch()
+        self.close_btn = QPushButton(objectName="primary")
+        self.close_btn.clicked.connect(self.accept)
+        row.addWidget(self.close_btn)
+        lay.addLayout(row)
+        self.retranslate()
+
+    def _choose(self):
+        d = QFileDialog.getExistingDirectory(self, tr("folder_dialog"), str(self.win.folder))
+        if d:
+            self.win.folder = Path(d)
+            self.win.settings.setValue("folder", d)
+            self.retranslate()
+
+    def retranslate(self):
+        self.setWindowTitle(tr("settings"))
+        self.heading.setText(tr("settings"))
+        self.l_lang.setText(tr("set_ui_lang"))
+        self.l_theme.setText(tr("set_theme"))
+        self.l_folder.setText(tr("set_folder"))
+        self.theme.blockSignals(True)
+        self.theme.clear()
+        for key, _ in THEME_CHOICES:
+            self.theme.addItem(tr(key))
+        self.theme.setCurrentIndex(self.win.theme_index)
+        self.theme.blockSignals(False)
+        self.folder.setText(ItemView._short(self.win.folder))
+        self.folder.setToolTip(str(self.win.folder))
+        self.change.setText(tr("change"))
+        self.open.setText(tr("open"))
+        self.offline.setText("●  " + tr("offline"))
+        self.close_btn.setText(tr("close"))
 
 
 class MainWindow(QMainWindow):
@@ -84,92 +150,71 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = QSettings("DersTranskript", "DersTranskript")
         i18n.set_lang(self.settings.value("ui_lang", _default_ui_lang()))
+        self.theme_index = self._int("theme", 0, len(THEME_CHOICES))
+        self.folder = Path(self.settings.value("folder", str(recordings_dir())))
         self.setWindowIcon(app_icon())
-        self.resize(940, 900)
-        self.setMinimumSize(720, 640)
-        self.entries = []
-        self.active = None
+        self.resize(1080, 760)
+        self.setMinimumSize(820, 560)
+        self.setAcceptDrops(True)
+        self.lib = Library()
+        self.rows = {}    # öğe id → ItemRow
+        self.views = {}   # öğe id → (kaydırma alanı, ItemView)
+        self.current = None
 
-        root = QWidget(objectName="root")
+        root = QWidget(objectName="content")
         self.setCentralWidget(root)
-        lay = QVBoxLayout(root)
-        lay.setContentsMargins(28, 20, 28, 20)
-        lay.setSpacing(14)
+        lay = QHBoxLayout(root)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
 
-        # başlık: ad + rozet + arayüz dili + tema
-        head = QHBoxLayout()
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        self.title = QLabel(objectName="title")
-        self.subtitle = QLabel(objectName="subtitle")
-        titles.addWidget(self.title)
-        titles.addWidget(self.subtitle)
-        head.addLayout(titles)
-        head.addStretch()
-        right = QVBoxLayout()
-        right.setSpacing(8)
-        self.badge = QLabel(objectName="badge")
-        right.addWidget(self.badge, alignment=Qt.AlignmentFlag.AlignRight)
-        prefs = QHBoxLayout()
-        prefs.setSpacing(8)
-        self.ui_lang = QComboBox(objectName="small")
-        for code, name in UI_LANGUAGES:
-            self.ui_lang.addItem(name, code)
-        self.ui_lang.setCurrentIndex(max(0, self.ui_lang.findData(i18n.get_lang())))
-        self.ui_lang.currentIndexChanged.connect(self._on_ui_lang)
-        self.theme = Segmented([k for k, _ in THEME_CHOICES], prop="small")
-        prefs.addWidget(self.ui_lang)
-        prefs.addWidget(self.theme)
-        right.addLayout(prefs)
-        head.addLayout(right)
-        lay.addLayout(head)
-
-        # sekmeler (kapatılabilir) + yeni pencere (+) + yan yana
-        bar = QHBoxLayout()
-        self.tabbar = QFrame(objectName="tabbar")
-        self.tab_row = QHBoxLayout(self.tabbar)
-        self.tab_row.setContentsMargins(3, 3, 3, 3)
-        self.tab_row.setSpacing(2)
-        self.add_btn = QPushButton("+", objectName="addTab")
+        # ---- kenar çubuğu: başlık + "+" , liste, ayarlar
+        side = QFrame(objectName="sidebar")
+        side.setFixedWidth(300)
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(14, 20, 14, 14)
+        sl.setSpacing(10)
+        top = QHBoxLayout()
+        top.setContentsMargins(8, 0, 4, 0)
+        self.app_title = QLabel(objectName="appTitle")
+        top.addWidget(self.app_title, 1)
+        self.add_btn = QPushButton("+", objectName="add")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.add_btn.clicked.connect(self._show_add_menu)
-        self.tab_row.addWidget(self.add_btn)
-        bar.addWidget(self.tabbar)
-        bar.addStretch()
-        self.split_btn = QPushButton(objectName="toggle")
-        self.split_btn.setCheckable(True)
-        self.split_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.split_btn.toggled.connect(self._update_layout)
-        bar.addWidget(self.split_btn)
-        lay.addLayout(bar)
+        self.add_btn.clicked.connect(self._add_menu)
+        top.addWidget(self.add_btn)
+        sl.addLayout(top)
+        sl.addSpacing(6)
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        self.list = QVBoxLayout(inner)
+        self.list.setContentsMargins(0, 0, 0, 0)
+        self.list.setSpacing(2)
+        self.list.addStretch()
+        area.setWidget(inner)
+        sl.addWidget(area, 1)
+        self.gear = QPushButton(objectName="gear")
+        self.gear.setIconSize(QSize(18, 18))
+        self.gear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gear.clicked.connect(self._open_settings)
+        sl.addWidget(self.gear)
+        lay.addWidget(side)
 
-        # gövde: pencereler (sekmeli veya yan yana) ya da boş durum
-        self.stack = QStackedWidget()
-        self.empty = EmptyState(self.add_panel)
-        self.split = QSplitter(Qt.Orientation.Horizontal)
-        self.split.setChildrenCollapsible(False)
-        self.split.setHandleWidth(18)
+        # ---- ayrıntı
+        self.stack = QStackedWidget(objectName="detail")
+        self.empty = EmptyState(self.new_recording, self.add_files)
         self.stack.addWidget(self.empty)
-        self.stack.addWidget(self.split)
         lay.addWidget(self.stack, 1)
 
-        # son oturumdaki pencereler ve ayarlar
-        self.theme.set_index(self._int("theme", 0, len(THEME_CHOICES)))
-        self.split_btn.setChecked(self.settings.value("side_by_side", False, type=bool))
-        saved = self.settings.value("open_tabs", None)
-        kinds = [k for k in (saved.split(",") if isinstance(saved, str) else ["file", "live"])
-                 if k in ("file", "live")]
-        for k in kinds:
-            if k == "file" or not self._live_entry():
-                self.add_panel(k, activate=False)
-        if self.entries:
-            self._activate(self.entries[min(self._int("active", 0, len(self.entries)), len(self.entries) - 1)])
-        self.theme.changed.connect(self._on_theme)
+        for it in self.lib.items:
+            self._add_row(it, top=False)
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self._shortcut_record)
         try:  # "Sistem" seçiliyken işletim sistemi teması değişirse uygula
-            QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: self._on_theme())
+            QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: self._apply_theme())
         except AttributeError:
             pass
-        self._update_layout()
+        if self.lib.items:
+            self.select(self.lib.items[0])
         self.retranslate()
 
     def _int(self, key, default, n):
@@ -177,143 +222,175 @@ class MainWindow(QMainWindow):
             v = int(self.settings.value(key, default))
         except (TypeError, ValueError):
             v = default
-        return v if 0 <= v < max(n, 1) else default
+        return v if 0 <= v < n else default
 
-    # --- pencereler -----------------------------------------------------
-    def _live_entry(self):
-        return next((e for e in self.entries if e.kind == "live"), None)
-
-    def add_panel(self, kind, activate=True):
-        if kind == "live" and self._live_entry():  # tek mikrofon: tek kayıt penceresi
-            self._activate(self._live_entry())
-            return
-        panel = FilePanel() if kind == "file" else LivePanel()
-        panel.load_settings(self.settings)
-        area = QScrollArea()  # pencere küçükse ezilmek yerine kaydırılsın
-        area.setWidgetResizable(True)
-        area.setFrameShape(QScrollArea.Shape.NoFrame)
-        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        area.setWidget(panel)
-        chip = TabChip()
-        e = Entry(kind, panel, area, chip)
-        chip.clicked.connect(lambda: self._activate(e))
-        chip.close.connect(lambda: self.close_panel(e))
-        panel.tab_status.connect(lambda s: self._set_status(e, s))
-        if kind == "file":
-            panel.title_changed.connect(lambda: self._render_chip(e))
+    # --- liste ----------------------------------------------------------
+    def _add_row(self, it, top=True):
+        row = ItemRow(it)
+        row.clicked.connect(lambda: self.select(it))
+        self.rows[it.id] = row
+        if top:
+            self.list.insertWidget(0, row)
         else:
-            panel.transcribe_request.connect(self._transcribe_recording)
-        self.entries.append(e)
-        self.tab_row.insertWidget(self.tab_row.count() - 1, chip)  # "+" düğmesinden önce
-        self.split.addWidget(area)
-        self._render_chip(e)
-        if activate or self.active is None:
-            self._activate(e)
-        self._update_layout()
-        return e
+            self.list.insertWidget(self.list.count() - 1, row)
+        return row
 
-    def close_panel(self, e):
-        if e.panel.busy():
-            if QMessageBox.question(self, tr("close_tip"), tr("close_busy")) != QMessageBox.StandardButton.Yes:
-                return
-        e.panel.stop_for_quit()
-        e.panel.save_settings(self.settings)
-        i = self.entries.index(e)
-        self.entries.remove(e)
-        for w in (e.chip, e.area):
-            w.setParent(None)
-            w.deleteLater()
-        if self.active is e:
-            self.active = None
-            if self.entries:
-                self._activate(self.entries[min(i, len(self.entries) - 1)])
-        self._update_layout()
-        self._update_title()
+    def _view(self, it):
+        if it.id not in self.views:
+            v = ItemView(it, self.lib, self.settings, lambda: self.folder)
+            v.row_status.connect(lambda text, kind, it=it: self.rows[it.id].set_status(text, kind))
+            v.row_refresh.connect(lambda it=it: self.rows[it.id].refresh())
+            v.closed.connect(self._on_closed)
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            area.setWidget(v)
+            self.stack.addWidget(area)
+            self.views[it.id] = (area, v)
+        return self.views[it.id]
 
-    def _activate(self, e):
-        self.active = e
-        for x in self.entries:
-            x.chip.set_active(x is e)
-        self._update_layout()
+    def select(self, it):
+        self.current = it
+        for iid, row in self.rows.items():
+            row.set_selected(it is not None and iid == it.id)
+        if it is None:
+            self.stack.setCurrentWidget(self.empty)
+            return
+        area, _ = self._view(it)
+        self.stack.setCurrentWidget(area)
 
-    def _update_layout(self, *_):
-        n = len(self.entries)
-        self.stack.setCurrentIndex(1 if n else 0)
-        self.split_btn.setVisible(n > 1)
-        side = self.split_btn.isChecked() and n > 1
-        for e in self.entries:
-            e.area.setVisible(side or e is self.active)
-        if side and self.width() < 640 * n:
-            self.resize(min(700 * n, 1900), self.height())
+    def _recording_view(self):
+        return next((v for _, v in self.views.values() if v.recording()), None)
 
-    def _show_add_menu(self):
+    def new_recording(self):
+        busy = self._recording_view()
+        if busy:  # tek mikrofon: süren kayda git
+            return self.select(busy.item)
+        pending = next((i for i in self.lib.items if i.new), None)
+        if pending:
+            return self.select(pending)
+        it = Item("rec", self.lib.next_rec_title())
+        it.new = True
+        self.lib.items.insert(0, it)
+        self._add_row(it)
+        self.select(it)
+
+    def add_files(self, paths=None):
+        if not paths:
+            exts = " ".join("*" + x for x in sorted(AUDIO_EXT))
+            paths, _ = QFileDialog.getOpenFileNames(
+                self, tr("file_dialog"), str(Path.home()),
+                f"{tr('filter_audio')} ({exts});;{tr('filter_all')} (*)")
+        last = None
+        for p in paths:
+            p = Path(p)
+            if not p.is_file():
+                continue
+            dur, _ = probe_audio(str(p))
+            if dur is None and p.suffix.lower() not in AUDIO_EXT:
+                QMessageBox.warning(self, tr("error_title"), tr("unsupported", name=p.name))
+                continue
+            existing = next((i for i in self.lib.items if i.audio == p), None)
+            if existing:
+                last = existing
+                continue
+            it = Item("file", p.stem, p, duration=dur, saved=True)
+            sidecar = p.with_suffix(".txt")  # daha önce yazıya dökülmüşse metni getir
+            if sidecar.exists():
+                it.text = sidecar.read_text(encoding="utf-8", errors="replace")
+                self.lib.write_text(it)
+            self.lib.add(it)
+            self._add_row(it)
+            last = it
+        if last:
+            self.select(last)
+
+    def _on_closed(self, it):
+        row = self.rows.pop(it.id, None)
+        if row:
+            row.setParent(None)
+            row.deleteLater()
+        area, view = self.views.pop(it.id, (None, None))
+        if area:
+            self.stack.removeWidget(area)
+            area.deleteLater()
+        if it in self.lib.items:
+            self.lib.items.remove(it)
+        if self.current is it:
+            self.select(self.lib.items[0] if self.lib.items else None)
+
+    def _add_menu(self):
         menu = QMenu(self)
-        a_file = menu.addAction(app_icon(), tr("new_file"))
-        a_live = menu.addAction(media_icon("record", current_colors()["live"]), tr("new_live"))
-        a_live.setEnabled(self._live_entry() is None)
+        c = colors()
+        a_rec = menu.addAction(glyph("record", c["red"]), tr("new_recording"))
+        a_file = menu.addAction(glyph("doc", c["accent"]), tr("add_file"))
         chosen = menu.exec(self.add_btn.mapToGlobal(self.add_btn.rect().bottomLeft()))
-        if chosen is a_file:
-            self.add_panel("file")
-        elif chosen is a_live:
-            self.add_panel("live")
+        if chosen is a_rec:
+            self.new_recording()
+        elif chosen is a_file:
+            self.add_files()
 
-    def _transcribe_recording(self, path):
-        """Kayıt listesindeki bir kaydı bir ses dosyası penceresinde yazıya dökmeye hazırla."""
-        e = next((x for x in self.entries if x.kind == "file" and not x.panel.busy()
-                  and not x.panel.audio_path), None) or self.add_panel("file")
-        e.panel.set_file(path)
-        self._activate(e)
+    def _shortcut_record(self):
+        v = self.views.get(self.current.id, (None, None))[1] if self.current else None
+        if v and v.item.kind == "rec" and v.rec_state in ("new", "loading", "recording", "paused"):
+            v.toggle_record()
+        else:
+            self.new_recording()
 
-    def _render_chip(self, e):
-        e.chip.label.setText(e.title() + (f"  {e.status}" if e.status else ""))
-        e.chip.close_btn.setToolTip(tr("close_tip"))
+    # --- sürükle bırak --------------------------------------------------
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
 
-    def _set_status(self, e, text):
-        e.status = text
-        self._render_chip(e)
-        self._update_title()
+    def dropEvent(self, e):
+        self.add_files([u.toLocalFile() for u in e.mimeData().urls()])
 
-    def _update_title(self):
-        """Pencere başlığı = görev çubuğunda da görünen durum özeti."""
-        parts = [f"{e.title()} {e.status}" for e in self.entries if e.status]
-        self.setWindowTitle(f"{tr('app_title')} — {' · '.join(parts)}" if parts else tr("app_title"))
+    # --- ayarlar / tema / dil -------------------------------------------
+    def _open_settings(self):
+        SettingsDialog(self).exec()
 
-    # --- tema / dil -----------------------------------------------------
-    def _on_theme(self, *_):
-        apply_theme(QApplication.instance(), THEME_CHOICES[self.theme.index][1])
-        for e in self.entries:
-            if e.kind == "live":
-                e.panel.refresh_icons()
+    def set_theme(self, i):
+        self.theme_index = i
+        self.settings.setValue("theme", i)
+        self._apply_theme()
 
-    def _on_ui_lang(self, *_):
-        i18n.set_lang(self.ui_lang.currentData())
+    def _apply_theme(self):
+        apply_theme(QApplication.instance(), THEME_CHOICES[self.theme_index][1])
+        self.empty.retranslate()
+        self.gear.setIcon(glyph("gear", colors()["muted"]))
+        for _, v in self.views.values():
+            v.refresh_icons()
+        self.update()
+
+    def set_ui_lang(self, code):
+        i18n.set_lang(code)
+        self.settings.setValue("ui_lang", code)
         self.retranslate()
+        for dlg in self.findChildren(SettingsDialog):
+            dlg.retranslate()
 
     def retranslate(self):
-        self._update_title()
-        self.title.setText(tr("app_title"))
-        self.subtitle.setText(tr("app_subtitle"))
-        self.badge.setText(tr("badge_offline"))
-        self.ui_lang.setToolTip(tr("ui_lang_tip"))
-        self.theme.retranslate()
+        self.setWindowTitle(tr("app_title"))
+        self.app_title.setText(tr("app_title"))
         self.add_btn.setToolTip(tr("add_tip"))
-        self.split_btn.setText("▥  " + tr("side_by_side"))
-        self.split_btn.setToolTip(tr("side_by_side_tip"))
+        self.gear.setText("  " + tr("settings"))
+        self.gear.setIcon(glyph("gear", colors()["muted"]))
         self.empty.retranslate()
-        for e in self.entries:
-            e.panel.retranslate()
-            self._render_chip(e)
+        for row in self.rows.values():
+            row.refresh()
+        for _, v in self.views.values():
+            v.retranslate()
 
     def closeEvent(self, e):
-        if any(x.panel.busy() for x in self.entries):
+        views = [v for _, v in self.views.values()]
+        if any(v.busy() for v in views):
             if QMessageBox.question(self, tr("quit_title"), tr("quit_body")) \
                     != QMessageBox.StandardButton.Yes:
                 e.ignore()
                 return
-        for x in self.entries:
-            x.panel.stop_for_quit()
-        live = self._live_entry()
-        unsaved = live.panel.takes.unsaved() if live else []
+        for v in views:
+            v.stop_for_quit()
+        unsaved = self.lib.unsaved()
         if unsaved:  # kaydedilmemiş kayıtlar: sakla (sonraki açılışta listede) / sil / vazgeç
             box = QMessageBox(QMessageBox.Icon.Question, tr("quit_title"),
                               tr("quit_unsaved", n=len(unsaved)), parent=self)
@@ -323,23 +400,18 @@ class MainWindow(QMainWindow):
             box.setDefaultButton(keep)
             box.exec()
             if box.clickedButton() is delete:
-                live.panel.takes.delete_all_unsaved()
+                for it in unsaved:
+                    self.lib.remove(it, delete_files=True)
             elif box.clickedButton() is not keep:
                 e.ignore()
                 return
-        st = self.settings
-        st.setValue("ui_lang", i18n.get_lang())
-        st.setValue("theme", self.theme.index)
-        st.setValue("side_by_side", self.split_btn.isChecked())
-        st.setValue("open_tabs", ",".join(x.kind for x in self.entries))
-        st.setValue("active", self.entries.index(self.active) if self.active in self.entries else 0)
-        for x in self.entries:
-            x.panel.save_settings(st)
+        self.lib.items = [i for i in self.lib.items if not i.new]
+        self.lib.save_index()
         e.accept()
 
 
 def _default_ui_lang():
-    """İlk açılışta arayüz dili Türkçe; başlıktaki seçiciden değiştirilebilir ve hatırlanır."""
+    """İlk açılışta arayüz dili Türkçe; Ayarlar'dan değiştirilebilir ve hatırlanır."""
     return "tr"
 
 
@@ -372,7 +444,7 @@ def _selftest_mic():
     """Mikrofon yolu: varsa 1 sn okur. Mikrofonsuz makinede (ör. derleme sunucusu) atlanır."""
     from PyQt6.QtCore import QCoreApplication, QTimer
     from PyQt6.QtMultimedia import QMediaDevices
-    from panels import Microphone
+    from audio import Microphone
 
     app = QCoreApplication.instance() or QCoreApplication(sys.argv)
     dev = QMediaDevices.defaultAudioInput()
@@ -404,9 +476,8 @@ def main():
         font.setFamily("Segoe UI")  # macOS/Linux kendi sistem yazı tipini kullanır
     font.setPointSize(10 if sys.platform != "darwin" else 13)
     app.setFont(font)
-    apply_theme(app, "system")
     w = MainWindow()
-    w._on_theme()
+    w._apply_theme()
     w.show()
     sys.exit(app.exec())
 
