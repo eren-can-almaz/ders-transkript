@@ -3,7 +3,7 @@
 Her sürümün yenilikleri. Yeni sürüm çıkarılırken en üstteki "Yayımlanmamış" başlığı sürüm numarası ve
 tarihle değiştirilir; derleme, sürümün Releases sayfasındaki açıklamayı buradan alır.
 
-## Yayımlanmamış
+## v1.1 — 2026-10-03
 
 - Daha sade, Mac'e uygun görünüm: başlıktaki düğmeler tek **⋯** menüsünde toplandı
 - Transkript kutusuz, daha geniş satır aralığıyla; kopyala / kaydet simge düğmeleri

@@ -21,6 +21,7 @@ Yukarıdaki bağlantılar her zaman **en son sürümü** indirir. Belirli bir s�
 
 | Sürüm | Tarih | Yenilikler | Windows | Mac (Apple M) | Mac (Intel) | Linux |
 |---|---|---|---|---|---|---|
+| **v1.1** | 2026-10-03 | Daha sade, Mac'e uygun görünüm | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-windows.zip) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-linux.tar.gz) |
 | **v1.0** | 2026-10-02 | İlk sürüm | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-windows.zip) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-linux.tar.gz) |
 
 Her sürümün ayrıntılı notları: [CHANGELOG.md](CHANGELOG.md) · [Releases](https://github.com/writerforight/ders-transkript/releases).
