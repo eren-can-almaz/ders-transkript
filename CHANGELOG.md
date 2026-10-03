@@ -3,6 +3,11 @@
 Her sürümün yenilikleri. Yeni sürüm çıkarılırken en üstteki "Yayımlanmamış" başlığı sürüm numarası ve
 tarihle değiştirilir; derleme, sürümün Releases sayfasındaki açıklamayı buradan alır.
 
+## Yayımlanmamış
+
+- Güncelleme denetimi depoyu değişmeyen kimlik numarasıyla bulur: GitHub kullanıcı adı değişse de
+  bildirim ve indirme sayfası hep doğru depoyu gösterir
+
 ## v1.1 — 2026-10-03
 
 - Daha sade, Mac'e uygun görünüm: başlıktaki düğmeler tek **⋯** menüsünde toplandı

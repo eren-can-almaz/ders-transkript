@@ -10,10 +10,10 @@ Python, model veya başka bir şey kurmanız gerekmez.
 
 | Bilgisayar | İndir | Kurulum |
 |---|---|---|
-| **Windows** 10/11 | [⬇ DersTranskript-windows.zip](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-windows.zip) | Zip'e sağ tık → **Tümünü ayıkla** → klasördeki `DersTranskript.exe` |
-| **Mac** (Apple M1/M2/M3/M4), macOS 14+ | [⬇ DersTranskript-mac-apple-silicon.dmg](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-mac-apple-silicon.dmg) | DMG'yi açın, uygulamayı **Uygulamalar** klasörüne sürükleyin |
-| **Mac** (Intel), macOS 13+ | [⬇ DersTranskript-mac-intel.dmg](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-mac-intel.dmg) | aynı |
-| **Linux** (Ubuntu 22.04+, Debian 12+, Fedora 36+) | [⬇ DersTranskript-linux.tar.gz](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-linux.tar.gz) | Açın, klasörde `./kur.sh` → menüde **Ders Transkript** |
+| **Windows** 10/11 | [⬇ DersTranskript-windows.zip](https://github.com/eren-can-almaz/ders-transkript/releases/latest/download/DersTranskript-windows.zip) | Zip'e sağ tık → **Tümünü ayıkla** → klasördeki `DersTranskript.exe` |
+| **Mac** (Apple M1/M2/M3/M4), macOS 14+ | [⬇ DersTranskript-mac-apple-silicon.dmg](https://github.com/eren-can-almaz/ders-transkript/releases/latest/download/DersTranskript-mac-apple-silicon.dmg) | DMG'yi açın, uygulamayı **Uygulamalar** klasörüne sürükleyin |
+| **Mac** (Intel), macOS 13+ | [⬇ DersTranskript-mac-intel.dmg](https://github.com/eren-can-almaz/ders-transkript/releases/latest/download/DersTranskript-mac-intel.dmg) | aynı |
+| **Linux** (Ubuntu 22.04+, Debian 12+, Fedora 36+) | [⬇ DersTranskript-linux.tar.gz](https://github.com/eren-can-almaz/ders-transkript/releases/latest/download/DersTranskript-linux.tar.gz) | Açın, klasörde `./kur.sh` → menüde **Ders Transkript** |
 
 Yukarıdaki bağlantılar her zaman **en son sürümü** indirir. Belirli bir sürüm için:
 
@@ -21,10 +21,10 @@ Yukarıdaki bağlantılar her zaman **en son sürümü** indirir. Belirli bir s�
 
 | Sürüm | Tarih | Yenilikler | Windows | Mac (Apple M) | Mac (Intel) | Linux |
 |---|---|---|---|---|---|---|
-| **v1.1** | 2026-10-03 | Daha sade, Mac'e uygun görünüm | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-windows.zip) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.1/DersTranskript-linux.tar.gz) |
-| **v1.0** | 2026-10-02 | İlk sürüm | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-windows.zip) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-linux.tar.gz) |
+| **v1.1** | 2026-10-03 | Daha sade, Mac'e uygun görünüm | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.1/DersTranskript-windows.zip) | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.1/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.1/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.1/DersTranskript-linux.tar.gz) |
+| **v1.0** | 2026-10-02 | İlk sürüm | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.0/DersTranskript-windows.zip) | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.0/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.0/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/eren-can-almaz/ders-transkript/releases/download/v1.0/DersTranskript-linux.tar.gz) |
 
-Her sürümün ayrıntılı notları: [CHANGELOG.md](CHANGELOG.md) · [Releases](https://github.com/writerforight/ders-transkript/releases).
+Her sürümün ayrıntılı notları: [CHANGELOG.md](CHANGELOG.md) · [Releases](https://github.com/eren-can-almaz/ders-transkript/releases).
 Yeşil **Code → Download ZIP** düğmesi yalnızca kaynak kodu indirir, uygulama değildir.
 
 **Mac'im hangisi?**  menüsü → **Bu Mac Hakkında**: "Çip: Apple M…" yazıyorsa **Apple M** dosyası,

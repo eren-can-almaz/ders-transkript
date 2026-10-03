@@ -2,7 +2,8 @@
 
 Yeni sürüm varsa kullanıcıya sorar; "İndir" indirme sayfasını tarayıcıda açar. Güvenlik için bilerek
 sınırlı: hiçbir dosya indirilmez ya da çalıştırılmaz, uygulama kendini değiştirmez; cevaptan yalnızca
-sürüm numarası okunur ve açılan adres her zaman koddaki sabit PAGE'dir (cevaptaki bir bağlantı değil).
+sürüm numarası okunur. Açılan adres, cevap deponun kendi sürüm sayfasını gösteriyorsa odur (kullanıcı adı
+değişse de doğru adres), değilse koddaki sabit PAGE.
 İnternet yoksa ya da bir hata olursa sessizce geçer. Ayarlar'dan kapatılabilir.
 Ağ isteği Qt ile yapılır: her sistemin kendi sertifika deposunu kullanır (paketlenmiş Python'un
 macOS'taki sertifika sorunu olmaz).
@@ -12,9 +13,9 @@ import json
 from PyQt6.QtCore import QObject, QUrl, pyqtSignal
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
-from version import REPO, VERSION
+from version import REPO, REPO_ID, VERSION
 
-API = f"https://api.github.com/repos/{REPO}/releases/latest"
+API = f"https://api.github.com/repositories/{REPO_ID}/releases/latest"  # adla değil kimlikle
 PAGE = f"https://github.com/{REPO}/releases/latest"
 
 
@@ -31,9 +32,22 @@ def is_newer(tag, current=VERSION):
     return new is not None and cur is not None and new > cur
 
 
+def safe_page(url):
+    """Cevaptaki sürüm sayfası yalnızca github.com'da bir sürüm sayfasıysa kullanılır; değilse sabit PAGE."""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(str(url))
+    except ValueError:
+        return PAGE
+    parts = u.path.strip("/").split("/")
+    ok = (u.scheme == "https" and u.netloc == "github.com" and len(parts) == 5
+          and parts[1] == REPO.split("/")[1] and parts[2:4] == ["releases", "tag"] and not u.query and not u.fragment)
+    return url if ok else PAGE
+
+
 class UpdateChecker(QObject):
-    """found(etiket) yalnızca daha yeni bir sürüm varsa yayılır. done(http durumu | None) her zaman."""
-    found = pyqtSignal(str)
+    """found(etiket, sayfa) yalnızca daha yeni bir sürüm varsa yayılır. done(http durumu | None) her zaman."""
+    found = pyqtSignal(str, str)
     done = pyqtSignal(object)
 
     def __init__(self, parent=None):
@@ -55,7 +69,7 @@ class UpdateChecker(QObject):
                 data = json.loads(bytes(reply.readAll()).decode("utf-8"))
                 tag = str(data.get("tag_name", ""))[:20]
                 if is_newer(tag):
-                    self.found.emit(tag)
+                    self.found.emit(tag, safe_page(data.get("html_url")))
         except (ValueError, AttributeError):
             pass
         finally:

@@ -508,7 +508,7 @@ class MainWindow(QMainWindow):
         self._updater.found.connect(self._on_update)
         self._updater.check()
 
-    def _on_update(self, tag):
+    def _on_update(self, tag, page):
         if self.settings.value("updates/skip", "") == tag:
             return
         box = QMessageBox(self)
@@ -520,8 +520,7 @@ class MainWindow(QMainWindow):
         box.setDefaultButton(get)
         box.exec()
         if box.clickedButton() is get:
-            from updates import PAGE
-            QDesktopServices.openUrl(QUrl(PAGE))  # her zaman sabit adres: cevaptaki bağlantıya güvenilmez
+            QDesktopServices.openUrl(QUrl(page))  # updates.safe_page: yalnızca github.com'daki sürüm sayfası
         elif box.clickedButton() is skip:
             self.settings.setValue("updates/skip", tag)
 
