@@ -93,6 +93,15 @@ QPushButton#closePage {{
     min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px;
 }}
 QPushButton#closePage:hover {{ background: {fill}; color: {text}; }}
+QPushButton#iconBtn {{
+    background: transparent; border-radius: 8px; padding: 0;
+    min-width: 32px; max-width: 32px; min-height: 30px; max-height: 30px;
+}}
+QPushButton#iconBtn:hover {{ background: {fill}; }}
+QPushButton#iconBtn:pressed {{ background: {fill2}; }}
+QPushButton#iconBtn::menu-indicator {{ image: none; width: 0; }}
+QPushButton#disclosure {{ background: transparent; color: {muted}; padding: 6px 8px; font-weight: 500; text-align: left; }}
+QPushButton#disclosure:hover {{ color: {text}; }}
 QPushButton#round {{
     background: {fill}; border-radius: 22px; padding: 0;
     min-width: 44px; max-width: 44px; min-height: 44px; max-height: 44px;
@@ -142,8 +151,9 @@ QSlider::handle:horizontal {{
 }}
 
 QFrame#box {{ background: {fill}; border-radius: 14px; }}
+QFrame#transcript {{ background: transparent; }}
 QFrame#sep {{ background: {sep}; border: none; max-height: 1px; min-height: 1px; }}
-QPlainTextEdit {{
+QPlainTextEdit, QTextEdit {{
     background: transparent; border: none; font-size: 15px; selection-background-color: {selection};
 }}
 QScrollArea {{ background: transparent; border: none; }}
@@ -262,7 +272,8 @@ def app_icon():
 
 
 def glyph(kind, color, size=48):
-    """Basit simgeler: record, stop, pause, play, mic (kayıt), wave (ses dosyası), doc, gear."""
+    """Basit simgeler: record, stop, pause, play, mic (kayıt), wave (ses dosyası), doc, gear,
+    more (⋯), chevron_down / chevron_right, copy, download."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -296,6 +307,35 @@ def glyph(kind, color, size=48):
         for i, h in enumerate([10, 20, 30, 18, 24, 12]):
             x = 8 * u + i * 5.6 * u
             p.drawRoundedRect(QRectF(x, 24 * u - h * u / 2, 3.4 * u, h * u), 1.7 * u, 1.7 * u)
+    elif kind == "check":
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 4 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
+        p.drawPolyline(QPolygonF([QPointF(11 * u, 25 * u), QPointF(20 * u, 34 * u), QPointF(37 * u, 14 * u)]))
+    elif kind == "more":  # ⋯
+        for x in (12, 24, 36):
+            p.drawEllipse(QPointF(x * u, 24 * u), 3.2 * u, 3.2 * u)
+    elif kind in ("chevron_down", "chevron_right"):
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 4 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
+        pts = [(14, 19), (24, 29), (34, 19)] if kind == "chevron_down" else [(19, 14), (29, 24), (19, 34)]
+        p.drawPolyline(QPolygonF([QPointF(x * u, y * u) for x, y in pts]))
+    elif kind == "copy":  # iki üst üste sayfa
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 3.2 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
+        p.drawRoundedRect(QRectF(17 * u, 15 * u, 21 * u, 25 * u), 4 * u, 4 * u)
+        path = QPainterPath()
+        path.moveTo(11 * u, 32 * u)
+        path.lineTo(11 * u, 12 * u)
+        path.quadTo(11 * u, 8 * u, 15 * u, 8 * u)
+        path.lineTo(30 * u, 8 * u)
+        p.drawPath(path)
+    elif kind == "download":  # aşağı ok + tepsi (metni dosyaya kaydet)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(col, 3.2 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
+        p.drawLine(QPointF(24 * u, 8 * u), QPointF(24 * u, 29 * u))
+        p.drawPolyline(QPolygonF([QPointF(16 * u, 21 * u), QPointF(24 * u, 29 * u), QPointF(32 * u, 21 * u)]))
+        p.drawPolyline(QPolygonF([QPointF(10 * u, 30 * u), QPointF(10 * u, 39 * u),
+                                  QPointF(38 * u, 39 * u), QPointF(38 * u, 30 * u)]))
     elif kind in ("doc", "gear"):
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(col, 3 * u, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))

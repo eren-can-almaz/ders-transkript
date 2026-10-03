@@ -15,7 +15,7 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtMultimedia import QMediaDevices
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from audio import Microphone
@@ -65,20 +65,18 @@ class ItemView(QWidget):
         self.title.editingFinished.connect(self._rename)
         self.title.textChanged.connect(self._fit_title)
         head.addWidget(self.title)
-        self.rename_btn = QPushButton("✎", objectName="closePage")
-        self.rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.rename_btn.clicked.connect(self.start_rename)
-        head.addWidget(self.rename_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         head.addStretch()
-        self.reveal_btn = QPushButton(objectName="plain")
-        self.reveal_btn.clicked.connect(self._reveal)
         self.save_btn = QPushButton(objectName="primary")
         self.save_btn.clicked.connect(self.save)
-        self.delete_btn = QPushButton(objectName="destructive")
-        self.delete_btn.clicked.connect(self.delete)
+        # seyrek eylemler (yeniden adlandır, klasörde göster, sil) tek ⋯ menüsünde: başlık sade kalsın
+        self.more_btn = QPushButton(objectName="iconBtn")
+        self.more_btn.setIconSize(QSize(18, 18))
+        self.more_menu = QMenu(self)
+        self.more_menu.aboutToShow.connect(self._fill_more_menu)
+        self.more_btn.setMenu(self.more_menu)
         self.close_btn = QPushButton("×", objectName="closePage")
         self.close_btn.clicked.connect(self.close_page)
-        for b in (self.reveal_btn, self.save_btn, self.delete_btn, self.close_btn):
+        for b in (self.save_btn, self.more_btn, self.close_btn):
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             head.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
         lay.addLayout(head)
@@ -156,8 +154,6 @@ class ItemView(QWidget):
         prl.setContentsMargins(0, 0, 0, 0)
         prl.addWidget(self.player)
         prl.addStretch()
-        self.wave_hint = QLabel(objectName="faint")
-        prl.addWidget(self.wave_hint)
         lay.addWidget(self.play_row)
         self.sel_row = QWidget()
         sr_l = QHBoxLayout(self.sel_row)
@@ -197,7 +193,8 @@ class ItemView(QWidget):
         lay.addWidget(self.tr_row)
 
         # ---- seçenekler (açılır)
-        self.opt_btn = QPushButton(objectName="plain")
+        self.opt_btn = QPushButton(objectName="disclosure")
+        self.opt_btn.setIconSize(QSize(12, 12))
         self.opt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.opt_btn.clicked.connect(lambda: self._show_options(not self.opt_panel.isVisible()))
         tl.addWidget(self.opt_btn)
@@ -264,6 +261,7 @@ class ItemView(QWidget):
         self.media.audioInputsChanged.connect(self.refresh_devices)
         self.refresh_devices()
         self.retranslate()
+        self.more_btn.setIcon(glyph("more", colors()["muted"]))  # temayla değişenler: refresh_icons
 
     # ================================================================ genel
     def busy(self):
@@ -289,7 +287,6 @@ class ItemView(QWidget):
             self.player.set_source(it.audio, it.duration)
             self._load_peaks()
         self.wave_view.setVisible(has_audio)
-        self.wave_hint.setVisible(has_audio and self.wave_view.sel is None)
         self.sel_row.setVisible(has_audio and self.wave_view.sel is not None)
         self.sel_an.setVisible(self.settings.value("adv/enabled", False, type=bool))
         self.sel_tr.setEnabled(self.file_worker is None)
@@ -303,9 +300,7 @@ class ItemView(QWidget):
         # başlıktaki eylemler
         unsaved_rec = it.kind == "rec" and not it.saved
         self.save_btn.setVisible(unsaved_rec and self.rec_state == "done")
-        self.reveal_btn.setVisible(bool(it.audio) and (it.saved or it.kind == "file"))
-        self.delete_btn.setVisible(not self.recording())
-        self.delete_btn.setText(tr("delete") if unsaved_rec else tr("remove"))
+        self.more_btn.setVisible(not self.recording() or self._can_reveal())
         self.tr_btn.setText(tr("retranscribe") if it.text.strip() else tr("transcribe"))
         self.tr_btn.setEnabled(self.file_worker is None)
         if self.file_worker is not None:
@@ -315,7 +310,6 @@ class ItemView(QWidget):
         repolish(self.tr_btn)
         self._fit_title()
         self.title.setReadOnly(self.recording())
-        self.rename_btn.setVisible(not self.recording())
         self._render_meta()
 
     def _render_meta(self):
@@ -335,9 +329,29 @@ class ItemView(QWidget):
         s = "~" + s[len(home):] if s.startswith(home) else s
         return s if len(s) <= limit else s[: limit // 2 - 1] + "…" + s[-(limit // 2):]
 
+    def _can_reveal(self):
+        it = self.item
+        return bool(it.audio) and (it.saved or it.kind == "file")
+
+    def _fill_more_menu(self):
+        m = self.more_menu
+        m.clear()
+        acts = []
+        if not self.recording():
+            acts.append((tr("rename"), self.start_rename))
+        if self._can_reveal():
+            acts.append((tr("show_in_folder"), self._reveal))
+        for text, fn in acts:
+            m.addAction(text).triggered.connect(fn)
+        if not self.recording():
+            m.addSeparator()
+            unsaved = self.item.kind == "rec" and not self.item.saved
+            m.addAction(tr("delete") if unsaved else tr("remove")).triggered.connect(self.delete)
+
     def _show_options(self, on):
         self.opt_panel.setVisible(on)
-        self.opt_btn.setText(("▾  " if on else "▸  ") + tr("options"))
+        self.opt_btn.setText(tr("options"))
+        self.opt_btn.setIcon(glyph("chevron_down" if on else "chevron_right", colors()["muted"]))
 
     def _set_note(self, text):
         self._note = text
@@ -347,16 +361,15 @@ class ItemView(QWidget):
     def retranslate(self):
         self.save_btn.setText(tr("save"))
         self.close_btn.setToolTip(tr("close_page"))
-        self.rename_btn.setToolTip(tr("rename"))
+        self.more_btn.setToolTip(tr("more"))
         self.title.setToolTip(tr("rename_tip"))
-        self.wave_hint.setText(tr("wave_hint"))
+        self.wave_view.setToolTip(tr("wave_hint"))
         self.sel_play.setText("▶  " + tr("sel_play"))
         self.sel_tr.setText(tr("sel_transcribe"))
         self.sel_an.setText(tr("sel_analyze"))
         self.sel_clear.setToolTip(tr("sel_clear"))
         self._on_selection(self.wave_view.sel, emit=False)
         self.an_btn.setText(tr("analysis"))
-        self.reveal_btn.setText(tr("show_in_folder"))
         self.mic_label.setText(tr("mic"))
         if not self._devices:
             self.mic_combo.setItemText(0, tr("no_mic"))
@@ -803,3 +816,6 @@ class ItemView(QWidget):
     def refresh_icons(self):
         self._render_rec()
         self.player.refresh_icons()
+        self.more_btn.setIcon(glyph("more", colors()["muted"]))
+        self._show_options(not self.opt_panel.isHidden())  # isVisible() sayfa ekranda değilken hep False
+        self.box.retranslate()

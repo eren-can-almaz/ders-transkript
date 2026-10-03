@@ -105,6 +105,13 @@ jobs:
           echo "${{ matrix.asset }}: $((size / 1000000)) MB"
           [ "$size" -lt 2147483648 ]
 
+      - name: Pencere görüntüleri (selftest)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ekran-${{ matrix.os }}
+          path: selftest_*.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
@@ -119,7 +126,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
-        with: { path: out, merge-multiple: true }
+        with: { path: out, merge-multiple: true, pattern: "DersTranskript-*" }  # ekran görüntüleri yayına girmesin
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*

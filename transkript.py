@@ -24,6 +24,9 @@ from library import Item, Library
 from theme import THEME_CHOICES, app_icon, apply_theme, colors, glyph, icon_pixmap
 from ui_parts import ItemRow
 from version import VERSION
+
+# macOS'ta içerik başlık çubuğunun altına uzanır (Qt 6.9+); diğer sistemlerde olağan pencere çerçevesi
+MAC_FULL_CONTENT = sys.platform == "darwin" and hasattr(Qt.WindowType, "ExpandedClientAreaHint")
 from views import ItemView
 
 
@@ -277,6 +280,7 @@ class MainWindow(QMainWindow):
         side.setFixedWidth(300)
         sl = QVBoxLayout(side)
         sl.setContentsMargins(14, 20, 14, 14)
+        self._side_layout = sl
         sl.setSpacing(10)
         top = QHBoxLayout()
         top.setContentsMargins(8, 0, 4, 0)
@@ -323,6 +327,42 @@ class MainWindow(QMainWindow):
         if self.lib.items:
             self.select(self.lib.items[0])
         self.retranslate()
+        self._title_band = 0  # macOS: içerik başlık çubuğunun altına uzanınca sürüklenebilir üst şerit (px)
+        if MAC_FULL_CONTENT:
+            self.setWindowFlag(Qt.WindowType.ExpandedClientAreaHint, True)
+            self.setWindowFlag(Qt.WindowType.NoTitleBarBackgroundHint, True)
+
+    # --- macOS: kenar çubuğu pencerenin üst kenarına kadar (Notlar / Ses Kayıtları gibi) ----------
+    def showEvent(self, e):
+        super().showEvent(e)
+        if MAC_FULL_CONTENT and not getattr(self, "_safe_hooked", False):
+            self._safe_hooked = True
+            self.windowHandle().safeAreaMarginsChanged.connect(lambda *_: self._apply_safe_area())
+            self._apply_safe_area()
+
+    def _apply_safe_area(self):
+        """Pencere düğmeleri (kırmızı/sarı/yeşil) kenar çubuğu başlığının üstüne binmesin."""
+        top = self.windowHandle().safeAreaMargins().top()
+        self._title_band = top
+        self._side_layout.setContentsMargins(14, 20 + top, 14, 14)
+
+    def _in_title_band(self, e):
+        return self._title_band and e.button() == Qt.MouseButton.LeftButton \
+            and e.position().y() < self._title_band + 12
+
+    def mousePressEvent(self, e):
+        # başlık çubuğu artık çizilmiyor: boş üst şeritten sürüklenince pencereyi sistem taşısın
+        if self._in_title_band(e) and self.windowHandle().startSystemMove():
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if self._in_title_band(e):  # macOS'ta başlık çubuğuna çift tıklama: büyüt / eski boyut
+            self.showNormal() if self.isMaximized() else self.showMaximized()
+            e.accept()
+            return
+        super().mouseDoubleClickEvent(e)
 
     def _int(self, key, default, n):
         try:
@@ -578,6 +618,7 @@ def selftest(audio=None):
     for name, _ in QUALITY:
         path = model_path(name)
         print(f"model {name}: {path} -> {'VAR' if (path / 'model.bin').exists() else 'YOK'}", flush=True)
+    _selftest_window()  # QApplication burada kurulur (sonraki testler onu kullanır)
     data = decode_audio(audio)[: 16000 * 30]
     for name, _ in QUALITY:  # pakete gömülü her kalite modeli yüklenebilmeli
         model = WhisperModel(str(model_path(name)), device="cpu", compute_type="int8",
@@ -589,6 +630,30 @@ def selftest(audio=None):
     _selftest_update()
     _selftest_mic()
     print("SELFTEST OK", flush=True)
+
+
+def _selftest_window():
+    """Ana pencere açılabiliyor mu; macOS'ta tam içerik düzeni ve güvenli alan. Derleme sunucusunda
+    (CI) pencerenin görüntüsü selftest_window.png ve (varsa çerçeveyle) selftest_screen.png olarak kaydedilir."""
+    from PyQt6.QtCore import QTimer
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    w = MainWindow()
+    w._apply_theme()
+    w.resize(1080, 720)
+    w.show()
+    QTimer.singleShot(2000, app.quit)
+    app.exec()
+    h = w.windowHandle()
+    top = h.safeAreaMargins().top() if h else -1
+    print(f"pencere: açıldı, macOS tam içerik {MAC_FULL_CONTENT}, üst güvenli alan {top}px", flush=True)
+    if os.environ.get("CI"):
+        w.grab().save("selftest_window.png")
+        shot = w.screen().grabWindow(0, w.frameGeometry().x(), w.frameGeometry().y(),
+                                     w.frameGeometry().width(), w.frameGeometry().height())
+        if not shot.isNull():
+            shot.save("selftest_screen.png")
+    w.hide()
 
 
 def _selftest_update():

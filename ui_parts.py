@@ -9,7 +9,7 @@ from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPalette, QPen, QText
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QAbstractButton, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QPlainTextEdit, QPushButton, QSlider, QVBoxLayout, QWidget,
+    QPushButton, QSlider, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from core import LANGUAGES, MODES, QUALITY, QUALITY_DEFAULT, fmt_time
@@ -205,36 +205,47 @@ class PlayerBar(QWidget):
 
 
 class TranscriptBox(QFrame):
-    """Transkript alanı: başlık, kelime sayısı, Kopyala / Metni kaydet ve metin (gri taslak desteğiyle)."""
+    """Transkript alanı: başlık, kelime sayısı, kopyala / kaydet simgeleri ve metin (gri taslak desteğiyle).
+
+    Kutusuz: metin sayfanın üzerinde, başlığın altında ince bir çizgiyle ayrılır (Notlar / Ses Kayıtları gibi).
+    """
     edited = pyqtSignal()  # kullanıcı metni değiştirdi (kaydetmek için)
+    LINE_HEIGHT = 140      # okunaklılık için satır yüksekliği (%)
 
     def __init__(self):
-        super().__init__(objectName="box")
+        super().__init__(objectName="transcript")
         self.default_path = None
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 16, 20, 16)
-        lay.setSpacing(10)
+        lay.setContentsMargins(0, 6, 0, 0)
+        lay.setSpacing(8)
         bar = QHBoxLayout()
+        bar.setSpacing(2)
         self.title = QLabel(objectName="sectionTitle")
         self.words = QLabel(objectName="faint")
-        self.save_btn = QPushButton(objectName="plain")
+        self.save_btn = QPushButton(objectName="iconBtn")
         self.save_btn.clicked.connect(self.save)
-        self.copy_btn = QPushButton(objectName="tinted")
-        self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_btn = QPushButton(objectName="iconBtn")
         self.copy_btn.clicked.connect(self.copy)
         bar.addWidget(self.title)
-        bar.addSpacing(8)
-        bar.addWidget(self.words)
+        bar.addSpacing(10)
+        bar.addWidget(self.words, alignment=Qt.AlignmentFlag.AlignBaseline)
         bar.addStretch()
-        bar.addWidget(self.save_btn)
-        bar.addWidget(self.copy_btn)
+        for b in (self.copy_btn, self.save_btn):
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setIconSize(QSize(17, 17))
+            bar.addWidget(b)
         lay.addLayout(bar)
-        self.text = QPlainTextEdit()
+        lay.addWidget(QFrame(objectName="sep"))
+        self.text = QTextEdit()
+        self.text.setAcceptRichText(False)
         self.text.setMinimumHeight(180)
+        self.text.document().setDocumentMargin(2)
         self.text.textChanged.connect(self._changed)
         lay.addWidget(self.text, 1)
         self.placeholder_key = "placeholder_none"
         self._draft_at = None
+        self._programmatic = True  # QTextEdit biçim değişikliğinde de textChanged yayar: düzenleme sayılmasın
+        self._apply_spacing()      # boş belgenin ilk bloğu: sonra eklenen metin bu biçimi devralır
         self._programmatic = False
         self._copied = False
         self.retranslate()
@@ -284,8 +295,17 @@ class TranscriptBox(QFrame):
         self._programmatic = True
         self._draft_at = None
         self.text.setPlainText(text)
+        self._apply_spacing()
         self._programmatic = False
         self._update()
+
+    def _apply_spacing(self):
+        from PyQt6.QtGui import QTextBlockFormat, QTextCursor
+        fmt = QTextBlockFormat()
+        fmt.setLineHeight(self.LINE_HEIGHT, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+        cur = QTextCursor(self.text.document())
+        cur.select(QTextCursor.SelectionType.Document)
+        cur.mergeBlockFormat(fmt)
 
     def plain(self):
         """Yalnızca kesinleşmiş metin (kopyala/kaydet bunu kullanır)."""
@@ -320,9 +340,9 @@ class TranscriptBox(QFrame):
         self._render_copy()
 
     def _render_copy(self):
-        self.copy_btn.setText(("✓  " + tr("copied")) if self._copied else tr("copy"))
-        self.copy_btn.setProperty("done", "true" if self._copied else "false")
-        repolish(self.copy_btn)
+        c = colors()
+        self.copy_btn.setIcon(glyph("check", c["green"]) if self._copied else glyph("copy", c["muted"]))
+        self.copy_btn.setToolTip(tr("copied") if self._copied else tr("copy"))
 
     def save(self):
         default = self.default_path or str(Path.home() / "transkript.txt")
@@ -332,7 +352,8 @@ class TranscriptBox(QFrame):
 
     def retranslate(self):
         self.title.setText(tr("transcript"))
-        self.save_btn.setText(tr("save_txt"))
+        self.save_btn.setIcon(glyph("download", colors()["muted"]))
+        self.save_btn.setToolTip(tr("save_txt"))
         self.text.setPlaceholderText(tr(self.placeholder_key))
         self._render_copy()
         self._update()
