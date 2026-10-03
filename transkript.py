@@ -634,7 +634,7 @@ def selftest(audio=None):
 
 def _selftest_window():
     """Ana pencere açılabiliyor mu; macOS'ta tam içerik düzeni ve güvenli alan. Derleme sunucusunda
-    (CI) pencerenin görüntüsü selftest_window.png ve (varsa çerçeveyle) selftest_screen.png olarak kaydedilir."""
+    (CI) pencerenin görüntüsü selftest_window.png olarak kaydedilir."""
     from PyQt6.QtCore import QTimer
 
     app = QApplication.instance() or QApplication(sys.argv)
@@ -644,15 +644,9 @@ def _selftest_window():
     w.show()
     QTimer.singleShot(2000, app.quit)
     app.exec()
-    h = w.windowHandle()
-    top = h.safeAreaMargins().top() if h else -1
-    print(f"pencere: açıldı, macOS tam içerik {MAC_FULL_CONTENT}, üst güvenli alan {top}px", flush=True)
+    print(f"pencere: açıldı, macOS tam içerik {MAC_FULL_CONTENT}, uygulanan üst pay {w._title_band}px", flush=True)
     if os.environ.get("CI"):
-        w.grab().save("selftest_window.png")
-        shot = w.screen().grabWindow(0, w.frameGeometry().x(), w.frameGeometry().y(),
-                                     w.frameGeometry().width(), w.frameGeometry().height())
-        if not shot.isNull():
-            shot.save("selftest_screen.png")
+        w.grab().save("selftest_window.png")  # yalnızca pencerenin içeriği (ekranın kendisi değil)
     w.hide()
 
 
