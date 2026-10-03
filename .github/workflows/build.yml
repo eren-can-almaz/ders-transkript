@@ -25,6 +25,10 @@ jobs:
     timeout-minutes: 60  # bir şey takılırsa 6 saat beklemesin
     steps:
       - uses: actions/checkout@v4
+      - name: Sürüm notu var mı (derlemeden önce; yoksa yayın adımı sonda başarısız olurdu)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: grep -q "^## ${GITHUB_REF_NAME} " CHANGELOG.md || { echo "CHANGELOG.md'ye '## ${GITHUB_REF_NAME} — tarih' bölümünü ekleyin"; exit 1; }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
 
@@ -127,13 +131,27 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true, pattern: "DersTranskript-*" }  # ekran görüntüleri yayına girmesin
+      - uses: actions/checkout@v4
+        with: { path: src, sparse-checkout: CHANGELOG.md, sparse-checkout-cone-mode: false }
+      - name: Sürüm notları (CHANGELOG.md'den bu sürümün bölümü + kurulum)
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # "## v1.1 — tarih" başlığından bir sonraki "## " başlığına kadar
+          awk -v t="$tag" '/^## /{p = ($2 == t)} p && !/^## /' src/CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md'de '## $tag' bölümü yok"; exit 1; }
+          cat >> notes.md <<'MD'
+
+          ---
+          **İndirme:** bilgisayarınıza uygun dosyayı seçin; modeller içinde, internet ve ek kurulum gerekmez.
+          - **Windows:** `DersTranskript-windows.zip` → zip'i açın → `DersTranskript.exe`
+          - **Mac (M1/M2/M3/M4):** `DersTranskript-mac-apple-silicon.dmg` (macOS 14+)
+          - **Mac (Intel):** `DersTranskript-mac-intel.dmg`
+          - **Linux:** `DersTranskript-linux.tar.gz` → açın → `./kur.sh` (menüye ekler)
+
+          İlk açılıştaki güvenlik uyarısı ve diğer sürümler için depo sayfasındaki README'ye bakın.
+          MD
+          cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
-          body: |
-            Bilgisayarınıza uygun dosyayı indirin; modeller içinde, internet ve ek kurulum gerekmez.
-            - **Windows:** `DersTranskript-windows.zip` → zip'i açın → `DersTranskript.exe`
-            - **Mac (M1/M2/M3/M4):** `DersTranskript-mac-apple-silicon.dmg` (macOS 14+)
-            - **Mac (Intel):** `DersTranskript-mac-intel.dmg`
-            - **Linux:** `DersTranskript-linux.tar.gz` → açın → `./kur.sh` (menüye ekler)
-            İlk açılışta çıkan güvenlik uyarısı için README'deki adımlara bakın.
+          body_path: notes.md

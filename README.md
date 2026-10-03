@@ -5,7 +5,7 @@ Ders kayıtlarını ve mikrofon kayıtlarını **internetsiz** metne çeviren ma
 
 ## İndirme
 
-Bilgisayarınıza uygun bağlantıya tıklayın; indirme hemen başlar (~1,5 GB). Modeller dosyanın içindedir:
+Bilgisayarınıza uygun bağlantıya tıklayın; **en son sürüm** hemen inmeye başlar (~1,5 GB). Modeller dosyanın içindedir:
 Python, model veya başka bir şey kurmanız gerekmez.
 
 | Bilgisayar | İndir | Kurulum |
@@ -15,7 +15,15 @@ Python, model veya başka bir şey kurmanız gerekmez.
 | **Mac** (Intel), macOS 13+ | [⬇ DersTranskript-mac-intel.dmg](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-mac-intel.dmg) | aynı |
 | **Linux** (Ubuntu 22.04+, Debian 12+, Fedora 36+) | [⬇ DersTranskript-linux.tar.gz](https://github.com/writerforight/ders-transkript/releases/latest/download/DersTranskript-linux.tar.gz) | Açın, klasörde `./kur.sh` → menüde **Ders Transkript** |
 
-Tüm sürümler ve değişiklikler: [Releases](https://github.com/writerforight/ders-transkript/releases).
+Yukarıdaki bağlantılar her zaman **en son sürümü** indirir. Belirli bir sürüm için:
+
+## Tüm sürümler
+
+| Sürüm | Tarih | Yenilikler | Windows | Mac (Apple M) | Mac (Intel) | Linux |
+|---|---|---|---|---|---|---|
+| **v1.0** | 2026-10-02 | İlk sürüm | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-windows.zip) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-mac-apple-silicon.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-mac-intel.dmg) | [⬇](https://github.com/writerforight/ders-transkript/releases/download/v1.0/DersTranskript-linux.tar.gz) |
+
+Her sürümün ayrıntılı notları: [CHANGELOG.md](CHANGELOG.md) · [Releases](https://github.com/writerforight/ders-transkript/releases).
 Yeşil **Code → Download ZIP** düğmesi yalnızca kaynak kodu indirir, uygulama değildir.
 
 **Mac'im hangisi?**  menüsü → **Bu Mac Hakkında**: "Çip: Apple M…" yazıyorsa **Apple M** dosyası,
