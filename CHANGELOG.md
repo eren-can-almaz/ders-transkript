@@ -5,6 +5,8 @@ tarihle değiştirilir; derleme, sürümün Releases sayfasındaki açıklamayı
 
 ## Yayımlanmamış
 
+- Kayıt başlığı uzun adlarda baştan kesiliyordu ("rier serileri"); artık tam görünür
+- Lisans: GNU GPL v3.0
 - Güncelleme denetimi depoyu değişmeyen kimlik numarasıyla bulur: GitHub kullanıcı adı değişse de
   bildirim ve indirme sayfası hep doğru depoyu gösterir
 

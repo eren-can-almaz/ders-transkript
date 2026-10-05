@@ -688,8 +688,12 @@ class ItemView(QWidget):
                 pass
 
     def _fit_title(self, *_):
+        # stil dosyası (26 px kalın başlık) uygulanmadan ölçülürse küçük yazı tipiyle ölçülür ve başlık kesilir
+        self.title.ensurePolished()
         fm = self.title.fontMetrics()
         self.title.setFixedWidth(min(560, max(120, fm.horizontalAdvance(self.title.text() + "  ") + 24)))
+        if not self.title.hasFocus():
+            self.title.setCursorPosition(0)  # çok uzun adlarda baş görünsün, son değil
 
     def start_rename(self):
         if self.recording():
