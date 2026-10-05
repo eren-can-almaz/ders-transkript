@@ -446,8 +446,15 @@ class ItemView(QWidget):
         if status == Qt.PermissionStatus.Granted:
             return self.start()
         if status == Qt.PermissionStatus.Undetermined:
-            app.requestPermission(perm, self, lambda p: self._check_permission_then_start()
-                                  if app.checkPermission(p) != Qt.PermissionStatus.Undetermined else None)
+            # PyQt6 imzası: requestPermission(izin, geri_çağırma) — bağlam nesnesi alan C++ aşırı yüklemesi yok.
+            # Geri çağırmaya genel QPermission gelir: checkPermission() onu kabul etmez, p.status() kullanılır.
+            def answered(p):
+                try:
+                    if p.status() != Qt.PermissionStatus.Undetermined:
+                        QTimer.singleShot(0, self._check_permission_then_start)
+                except RuntimeError:  # pencere bu arada kapatıldıysa
+                    pass
+            app.requestPermission(perm, answered)
             return
         QMessageBox.warning(self, tr("error_title"), tr("mic_denied"))
 

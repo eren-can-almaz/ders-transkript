@@ -3,8 +3,10 @@
 Her sürümün yenilikleri. Yeni sürüm çıkarılırken en üstteki "Yayımlanmamış" başlığı sürüm numarası ve
 tarihle değiştirilir; derleme, sürümün Releases sayfasındaki açıklamayı buradan alır.
 
-## Yayımlanmamış
+## v1.2 — 2026-10-05
 
+- **macOS:** canlı kayıt başlatılırken çıkan "requestPermission … unexpected type 'ItemView'" hatası
+  düzeltildi; mikrofon izni artık doğru isteniyor ve izin verilince kayıt kendiliğinden başlıyor
 - Kayıt başlığı uzun adlarda baştan kesiliyordu ("rier serileri"); artık tam görünür
 - Lisans: GNU GPL v3.0
 - Güncelleme denetimi depoyu değişmeyen kimlik numarasıyla bulur: GitHub kullanıcı adı değişse de
